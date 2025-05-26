@@ -1,0 +1,62 @@
+# Mem0 Configuration for Hermes-2-Pro-Mistral with Hybrid Memory
+# Optimized for RTX 3090
+
+# Model settings optimized for RTX 3090
+model:
+  path: "/home/user/models/Hermes-2-Pro-Mistral-10.7B-Q6_K/Hermes-2-Pro-Mistral-10.7B-Q6_K.gguf"
+  n_gpu_layers: 99      # Offload all layers to GPU (RTX 3090 has 24GB VRAM)
+  n_ctx: 8192          # Context window size
+  n_batch: 512         # Batch size for prompt processing
+  n_threads: 8         # Number of CPU threads
+  temperature: 0.7     # Sampling temperature
+  top_p: 0.9          # Top-p sampling
+  repeat_penalty: 1.1  # Repetition penalty
+  max_tokens: 2048     # Maximum tokens to generate
+
+# Mem0 hybrid memory configuration
+mem0:
+  # Vector store configuration (Qdrant)
+  vector_store:
+    provider: "qdrant"
+    config:
+      host: "localhost"
+      port: 6333
+      collection_name: "hermes_memory"
+  
+  # Graph store configuration (Neo4j)
+  graph_store:
+    provider: "neo4j"
+    config:
+      url: "bolt://localhost:7687"
+      username: "neo4j"
+      password: "password123"
+  
+  # LLM configuration (using OpenAI for now - will be replaced)
+  llm:
+    provider: "openai"
+    config:
+      model: "gpt-4o-mini"
+  
+  # Embedder configuration
+  embedder:
+    provider: "huggingface"
+    config:
+      model: "sentence-transformers/all-MiniLM-L6-v2"
+  
+  # History database path
+  history_db_path: "./mem0_history.db"
+  
+  # Version
+  version: "v1.1"
+
+# Performance settings for RTX 3090
+performance:
+  # GPU memory allocation
+  gpu_memory_fraction: 0.95  # Use 95% of available VRAM
+  
+  # CUDA settings
+  cuda_visible_devices: "0"  # Use first GPU
+  
+  # Memory pooling
+  use_mmap: true            # Use memory mapping for model loading
+  use_mlock: false          # Don't lock model in RAM (we have GPU)

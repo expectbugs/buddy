@@ -1,0 +1,22 @@
+# Core dependencies
+mem0ai>=0.0.20
+llama-cpp-python>=0.2.0
+python-dotenv>=1.0.0
+
+# Vector database
+qdrant-client>=1.7.0
+
+# Graph database
+neo4j>=5.0.0
+
+# Embeddings
+sentence-transformers>=2.2.0
+
+# Utilities
+pyyaml>=6.0
+numpy>=1.24.0
+tqdm>=4.65.0
+
+# Optional for better performance
+torch>=2.0.0  # For GPU-accelerated embeddings
+transformers>=4.30.0  # For additional model support

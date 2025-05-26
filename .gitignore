@@ -1,0 +1,43 @@
+# Build artifacts
+build/
+*.o
+*.so
+*.a
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# External dependencies
+llama.cpp/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Model files (large)
+*.gguf
+*.bin
+models/
