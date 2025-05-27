@@ -40,4 +40,25 @@ Thumbs.db
 # Model files (large)
 *.gguf
 *.bin
+*.safetensors
 models/
+
+# Test files
+test_*.py
+*_test.py
+debug_*.py
+manual_test.py
+interactive_demo.py
+
+# Temporary files
+*.tmp
+*.temp
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Neo4j and Qdrant data
+data/
+qdrant_storage/

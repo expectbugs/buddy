@@ -1,17 +1,24 @@
-# Hermes-2-Pro-Mistral-10.7B with Mem0 Hybrid Memory System (Gentoo/OpenRC)
+# Buddy v0.1.0 - Advanced AI Assistant with Intelligent Memory System
 
-This project provides a complete setup for running the Hermes-2-Pro-Mistral-10.7B model with a sophisticated hybrid memory system using Mem0, Qdrant (vector database), and Neo4j (graph database), optimized for NVIDIA RTX 3090 on Gentoo Linux with OpenRC. All components are installed natively without Docker or containerization.
+Buddy is an advanced AI assistant built on Hermes-2-Pro-Mistral-10.7B with a sophisticated Phase 1 memory system featuring intelligent filtering, background processing, and comprehensive fact extraction. Optimized for NVIDIA RTX 3090 on Gentoo Linux with OpenRC.
 
 ## Features
 
+### 🧠 **Phase 1 Advanced Memory System**
+- **Intelligent Memory Filtering**: Automatically filters out trivial information (greetings, small talk)
+- **Priority-Based Storage**: Smart classification with priority scoring (0.0-1.0)
+- **Comprehensive Fact Extraction**: Systematically extracts personal facts, relationships, and preferences
+- **Background Memory Processing**: Non-blocking memory operations using ThreadPoolExecutor
+- **Advanced Search & Ranking**: Combined scoring (similarity + priority + recency)
+- **Memory Type Classification**: Organized by personal_fact, relationship, preference, project, technical
+
+### 🚀 **System Architecture**
 - **Gentoo/OpenRC Native**: Optimized for Gentoo Linux with OpenRC service management
 - **No Containers**: All components installed directly via Portage and manual installation
-- **Hybrid Memory System**: Combines vector search (Qdrant) and graph relationships (Neo4j) for enhanced context understanding
+- **Hybrid Memory System**: Combines vector search (Qdrant) and graph relationships (Neo4j)
 - **RTX 3090 Optimized**: Configured specifically for 24GB VRAM with optimal performance settings
 - **Q6_K Quantization**: High-quality quantization for near-perfect results
-- **Multiple Launch Modes**: Python integration with Mem0, native llama.cpp, or API server mode
-- **Persistent Memory**: Conversations and context are stored across sessions
-- **OpenRC Services**: Proper service management with runlevel integration
+- **Persistent Memory**: Conversations and context are stored across sessions with integrity
 
 ## System Requirements
 
@@ -84,23 +91,28 @@ Customize:
 
 ## Usage
 
-### Launch the System
+### Launch Buddy
 
 ```bash
-./launch_hermes_with_mem0.sh
+python3 launch_hermes_improved.py
 ```
 
-Choose from:
-1. **Python with Mem0** (recommended): Full memory integration
-2. **Native llama.cpp**: Direct model interaction
-3. **Server mode**: REST API endpoint
+### Interactive Commands
 
-### Python Integration Features
+- `/memory` - View stored memories organized by type
+- `/stats` - Display memory statistics and analytics
+- `/clear` - Clear all stored memories
+- `/exit` - End the session
 
-When using Python mode:
-- `/memory` - View conversation history
-- `/clear` - Clear memory
-- `exit/quit` - End session
+### Advanced Memory Features
+
+Buddy automatically:
+- **Extracts Facts**: Names, occupations, relationships, preferences
+- **Filters Trivially**: Ignores greetings, small talk, typos
+- **Prioritizes Information**: Higher scores for important facts
+- **Processes in Background**: Never blocks conversation flow
+- **Searches Intelligently**: Combines similarity, priority, and recency
+- **Organizes by Type**: Personal facts, relationships, preferences, projects, technical details
 
 ## Performance Settings
 
