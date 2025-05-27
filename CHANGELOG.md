@@ -5,6 +5,192 @@ All notable changes to Buddy will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### 🐛 Critical QWQ Response Display & Memory System Fixes
+
+These fixes address the critical issue where users could only see reasoning but not actual responses, along with several memory system improvements.
+
+### Fixed
+
+#### 🚨 **Critical Response Display Fix**
+- **QWQ Response Parser**: Fixed model output to include both reasoning AND answers after </think> tag
+- **Prompt Enhancement**: Updated system prompt to explicitly instruct closing </think> and providing answers
+- **Error on Missing Answer**: Parser now throws explicit error if model fails to provide answer
+- **Interaction Logging**: Fixed to log actual answers instead of reasoning in interactions.jsonl
+
+#### 💾 **Memory System Fixes**
+- **Episode Summary Errors**: Added validation for missing timestamp fields with explicit error messages
+- **Missing Memory Type**: Added 'factual_statement' to allowed memory types enum
+- **ID Field in Qdrant**: Added 'id' field to payload for easier memory access and tracking
+- **Neo4j Schema**: Flattened metadata storage to match actual implementation
+
+#### 🔍 **Database Integrity**
+- **Missing Fields Detection**: Identified all memories missing ID fields in existing data
+- **Metadata Structure**: Discovered Neo4j doesn't use 'metadata' field, stores flattened
+- **Summary Storage**: Verified summaries are stored with proper structure in both databases
+
+### Technical Details
+- Enhanced QWQ prompt to ensure proper response generation
+- Modified response parser to enforce answer generation after reasoning
+- Fixed interaction logging to store answers not reasoning
+- Added comprehensive error messages for debugging
+- Validated all memory storage includes proper ID fields
+
+## [0.4.2] - 2025-05-27
+
+### 🚨 Eliminated Silent Failures & Enhanced Error Visibility
+
+This release focuses on making all errors visible, ensuring robust error handling, and fixing critical service startup issues.
+
+### Fixed
+
+#### 🔊 **Silent Failure Elimination**
+- **Access Count Updates**: Added logging for all access count update failures
+- **Priority Parsing**: Now logs when priority parsing fails with specific error details  
+- **JSON Parsing**: Added warnings for initial parse failures before attempting cleanup
+- **Neo4j Graceful Degradation**: System now works without Neo4j, logging availability status
+- **Episode Summary Retrieval**: Added null checks to prevent crashes when Neo4j unavailable
+- **Stats Command**: Fixed crash when Neo4j is not connected
+
+#### 🛡️ **Critical Bug Fixes**
+- **IndexError Prevention**: Fixed unsafe list/dict access in response parsing
+- **ZeroDivisionError Prevention**: Added checks for division by zero in token budget calculations  
+- **File I/O Error Handling**: Added proper exception handling for config file operations
+- **Response Validation**: Enhanced validation for LLM response structure before accessing
+- **String Split Safety**: Fixed unsafe string split operations that could cause IndexError
+
+#### 🏗️ **Service Infrastructure Fixes**
+- **Neo4j OpenRC Service**: Fixed broken startup script with proper Java path and process management
+- **Service Stability**: Both Neo4j and Qdrant now start reliably and stay running
+- **Dependency Management**: Proper service dependencies and startup order
+- **Process Monitoring**: Enhanced PID file management and process health checks
+
+#### 📝 **Logging Enhancements**
+- **Comprehensive Coverage**: Every error path now has appropriate logging
+- **Structured Logging**: Consistent use of logger with appropriate levels (error, warning, info)
+- **No Silent Returns**: Removed all instances of returning None/empty without logging
+- **Debug Information**: Added context to all error messages for easier troubleshooting
+
+### Technical Details
+- Modified 15+ exception handlers to include proper logging
+- Added Neo4j availability checks in 5+ methods
+- Enhanced JSON parsing with detailed error reporting
+- Fixed Neo4j OpenRC service script with correct Java environment
+- Improved thread safety in episode tracking
+- Added protective checks for all array/dict access operations
+- Enhanced config file loading with proper error handling
+
+## [0.4.1] - 2025-05-27
+
+### 🤖 QWQ-32B Integration & Major Bug Fixes
+
+This release adds support for the QWQ-32B reasoning model and includes comprehensive bug fixes and synchronization between the QWQ and Hermes implementations.
+
+### Added
+
+#### 🧠 **QWQ-32B Model Support**
+- **New Launch Script**: `launch_qwq.py` - Complete integration with QWQ-32B reasoning model
+- **Chain-of-Thought Display**: View QWQ's reasoning process with `/reasoning` toggle
+- **ChatML Prompt Formatting**: Proper formatting for QWQ's expected input structure
+- **Token Budget Management**: 16K context window management with intelligent allocation
+- **Response Parser**: Extracts reasoning from `<think>` tags and final answers
+- **Configurable Reasoning**: `--hide-reasoning` flag to suppress chain-of-thought display
+
+#### 🛠️ **Command Line Arguments**
+- **`--debug`**: Enable verbose logging for troubleshooting
+- **`--quiet`**: Suppress all non-essential output
+- **`--hide-reasoning`**: Hide QWQ's reasoning process
+
+#### 📊 **Enhanced Features**
+- **Access Tracking**: Memories now track access count and last accessed time
+- **Trivial Exchange Filtering**: Skips memory extraction for simple greetings
+- **Token Budget Display**: `/budget` command shows context window usage
+
+### Fixed
+
+#### 🐛 **Critical Bug Fixes**
+- **Logger Initialization**: Fixed undefined logger errors by proper initialization
+- **Duplicate Methods**: Removed duplicate `extract_memory_candidates` definitions
+- **Missing Methods**: Added missing `_update_episode_tracking` implementation
+- **Variable Definitions**: Fixed missing `log_dir` initialization
+- **Database Schema**: Synchronized field names between QWQ and Hermes (id vs memory_id)
+- **Response Validation**: Added proper validation for empty/malformed LLM responses
+- **Import Organization**: Added missing imports (Query from neo4j)
+
+#### 🔧 **API & Integration Fixes**
+- **Qdrant Delete Operations**: Fixed incorrect selector syntax (using simple list instead of PointIdsList)
+- **Clear All Memories**: Changed to delete/recreate collection approach for reliability
+- **Neo4j Queries**: Made case-insensitive with `toLower()` functions
+- **UTF-8 Encoding**: Safe encoding throughout with proper error handling
+- **Text Wrapping**: 80-character wrapping for SSH terminal compatibility
+
+#### 🏗️ **Architecture Improvements**
+- **Thread Initialization**: Memory processor thread now starts in main() like Hermes
+- **Queue Management**: Unlimited queue size matching Hermes implementation
+- **Configuration Loading**: Robust config merging with QWQ-specific defaults
+- **Error Propagation**: Better exception chaining with `raise ... from e` pattern
+- **Resource Cleanup**: Proper error handling in all cleanup methods
+
+### Changed
+
+#### 🔄 **Database Schema Synchronization**
+- **Unified ID Fields**: Both QWQ and Hermes now use `id` instead of `memory_id`
+- **Timestamp Fields**: Standardized on `last_updated` instead of `updated_at`
+- **Metadata Handling**: Changed from nested to spread fields for compatibility
+- **Access Tracking**: Added consistent access_count and last_accessed fields
+
+#### 📝 **Memory Extraction Enhancement**
+- **Improved Prompt**: Adopted Hermes's comprehensive extraction prompt structure
+- **Better Examples**: Added detailed extraction examples in prompt
+- **Robust JSON Parsing**: Enhanced parsing with multiple fallback strategies
+- **Quality Filtering**: Added minimum text length validation (>5 characters)
+
+#### ⚡ **Performance & Reliability**
+- **Exponential Backoff**: Connection retries now use exponential delays
+- **Session Timeouts**: Neo4j queries now use 5-second timeouts
+- **Better Logging**: Debug messages for troubleshooting edge cases
+- **Graceful Degradation**: System continues working when components fail
+
+### Technical Details
+
+#### 🔧 **Model Parameters (QWQ)**
+```python
+{
+    "n_ctx": 16384,          # 16K context window
+    "n_gpu_layers": 99,      # Full GPU offload
+    "flash_attn": True,      # Flash attention enabled
+    "type_k": 8,             # Q8_0 KV cache
+    "type_v": 8,             # Q8_0 KV cache
+    "temperature": 0.6,      # Never 0 or 1
+    "top_k": 40,
+    "top_p": 0.95,
+    "min_p": 0.0,           # Must be explicitly 0
+    "repeat_penalty": 1.1
+}
+```
+
+#### 📊 **Logging Improvements**
+- **Sophisticated Suppression**: Silences noisy libraries while preserving important logs
+- **Environment Variables**: Controls verbosity via TF_CPP_MIN_LOG_LEVEL, etc.
+- **Llama.cpp Suppression**: Multiple signature attempts for compatibility
+- **Interaction Logging**: Consistent JSONL format with proper rotation
+
+### Upgrade Notes
+
+⚠️ **Database Compatibility**: The schema changes mean QWQ and Hermes can now share the same database, but existing QWQ memories with `memory_id` field will need migration.
+
+### Testing
+
+Comprehensive testing included:
+- Memory extraction and deduplication
+- UTF-8 encoding edge cases
+- SSH terminal response display
+- Service startup verification
+- Graceful shutdown handling
+- Queue processing reliability
+- Database operation compatibility
+
 ## [0.4.0-dev] - 2025-05-27
 
 ### 🧠 Phase 2: Memory Consolidation & Summarization

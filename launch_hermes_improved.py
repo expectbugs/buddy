@@ -505,13 +505,23 @@ JSON array:"""
                 stop=["\n\n", "User:", "Assistant:", "Question:"]  # Added Question: to stop
             )
             
-            response_text = response['choices'][0]['text'].strip()
+            if not response.get('choices') or len(response['choices']) == 0:
+                logger.error("Invalid extraction response: no choices found")
+                return []
+            
+            response_text = response['choices'][0].get('text', '').strip()
             
             # Clean up response text - more robust parsing
             if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0].strip()
+                parts = response_text.split("```json")
+                if len(parts) > 1:
+                    parts2 = parts[1].split("```")
+                    if len(parts2) > 0:
+                        response_text = parts2[0].strip()
             elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0].strip()
+                parts = response_text.split("```")
+                if len(parts) > 2:
+                    response_text = parts[1].strip()
             
             # Remove any extra text after the JSON array
             # Find the JSON array bounds more carefully
@@ -533,7 +543,8 @@ JSON array:"""
                     json_str = response_text[start_idx:end_idx+1]
                     try:
                         memories_data = json.loads(json_str)
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Initial JSON parse failed: {e}, attempting cleanup")
                         # If JSON parsing fails, try to clean up common issues
                         json_str = json_str.replace("'", '"')  # Replace single quotes
                         json_str = json_str.replace('True', 'true').replace('False', 'false')
@@ -552,7 +563,8 @@ JSON array:"""
                             try:
                                 priority = float(mem.get('priority', 0.5))
                                 priority = max(0.0, min(1.0, priority))  # Clamp to 0-1
-                            except:
+                            except (ValueError, TypeError) as e:
+                                logger.warning(f"Invalid priority value '{mem.get('priority')}' for memory: {e}. Using default 0.5")
                                 priority = 0.5
                             
                             candidate = MemoryCandidate(
@@ -815,8 +827,9 @@ JSON array:"""
                     SET m.last_accessed = $timestamp,
                         m.access_count = m.access_count + 1
                 """, memory_id=memory_id, timestamp=timestamp)
-        except:
-            pass  # Don't fail if update doesn't work
+        except Exception as e:
+            logger.warning(f"Failed to update access count for memory {memory_id}: {e}")
+            # Continue anyway - access tracking is not critical
     
     def process_interaction_background(self, user_input: str, assistant_response: str):
         """Process interaction in background thread with episode detection"""
@@ -1230,8 +1243,8 @@ def check_services():
         if 'started' not in result.stdout and 'running' not in result.stdout.lower():
             logger.warning("Qdrant service not running")
             services_ok = False
-    except:
-        logger.error("Could not check Qdrant status")
+    except Exception as e:
+        logger.error(f"Could not check Qdrant status: {e}")
         services_ok = False
     
     # Check Neo4j
@@ -1241,8 +1254,8 @@ def check_services():
         if 'running' not in result.stdout.lower() and 'started' not in result.stdout:
             logger.warning("Neo4j service not running")
             services_ok = False
-    except:
-        logger.error("Could not check Neo4j status")
+    except Exception as e:
+        logger.error(f"Could not check Neo4j status: {e}")
         services_ok = False
     
     if not services_ok:
