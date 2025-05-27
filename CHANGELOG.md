@@ -5,6 +5,55 @@ All notable changes to Buddy will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-dev] - 2025-05-26
+
+### 🔐 Phase 1: Permanent Storage Enhancements
+
+This development release implements robust permanent storage verification and reliability improvements.
+
+### Added
+
+#### 🔍 **Persistence Verification**
+- **Qdrant Persistence Tests**: Automatic verification on startup that data survives restarts
+- **Neo4j Durability Checks**: Ensures graph database is properly configured for persistence
+- **Standalone Verification Script**: `verify_qdrant_persistence.py` for manual persistence testing
+- **Startup Health Checks**: Both databases verified before accepting connections
+
+#### 🔄 **Connection Reliability**
+- **Neo4j Connection Pooling**: Up to 50 concurrent connections with 1-hour lifetime
+- **Automatic Retry Logic**: 3 attempts with 2s delay for both Qdrant and Neo4j
+- **Connection Acquisition Timeout**: 30s timeout prevents hanging on slow connections
+- **Graceful Degradation**: Clear error messages if services are unavailable
+
+#### 🛡️ **Graceful Shutdown**
+- **Signal Handlers**: Properly handles SIGTERM and SIGINT for clean shutdown
+- **Queue Processing**: Completes remaining memory operations before exit
+- **Resource Cleanup**: Ensures all database connections are properly closed
+- **Atexit Registration**: Cleanup guaranteed even on unexpected termination
+
+#### 📝 **Interaction Logging**
+- **Append-Only Log**: All conversations logged to `/var/log/buddy/interactions.jsonl`
+- **Structured Format**: JSON lines with timestamp, input, response, and extracted memories
+- **Automatic Rotation**: Log files rotate at 50MB with 10 backups kept
+- **Separate Loggers**: Application logs and interaction logs kept separate
+
+#### 📊 **Enhanced Monitoring**
+- **Detailed Logging**: Comprehensive logs for all operations with timestamps
+- **Log Rotation**: Main logs rotate at 10MB with 5 backups
+- **Memory Statistics**: Enhanced `/stats` command shows log file sizes
+- **Verification Suite**: `verify_phase1_implementation.py` tests all enhancements
+
+### Improved
+- **Startup Sequence**: Added persistence verification before accepting user input
+- **Error Messages**: More descriptive errors for troubleshooting
+- **Configuration**: Explicit Qdrant storage path configuration support
+
+### Technical Details
+- Created `/var/log/buddy/` directory for centralized logging
+- Implemented `logging.handlers.RotatingFileHandler` for automatic rotation
+- Added `max_connection_pool_size` and `connection_acquisition_timeout` to Neo4j
+- Integrated `signal` and `atexit` modules for proper shutdown handling
+
 ## [0.2.0] - 2025-05-26
 
 ### 🧠 Phase 1 Memory Improvements - Advanced Intelligence & Processing

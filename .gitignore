@@ -50,6 +50,9 @@ debug_*.py
 manual_test.py
 interactive_demo.py
 
+# Research directory
+research/
+
 # Temporary files
 *.tmp
 *.temp

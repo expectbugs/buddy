@@ -1,16 +1,24 @@
-# Buddy v0.2.0 - Advanced AI Assistant with Intelligent Memory System
+# Buddy v0.3.0-dev - Advanced AI Assistant with Robust Permanent Memory
 
-Buddy is an advanced AI assistant built on Hermes-2-Pro-Mistral-10.7B with a sophisticated Phase 1 memory system featuring intelligent filtering, background processing, and comprehensive fact extraction. Optimized for NVIDIA RTX 3090 on Gentoo Linux with OpenRC.
+Buddy is an advanced AI assistant built on Hermes-2-Pro-Mistral-10.7B with a sophisticated memory system now enhanced with Phase 1 permanent storage features including persistence verification, graceful shutdown, and comprehensive logging. Optimized for NVIDIA RTX 3090 on Gentoo Linux with OpenRC.
 
 ## Features
 
-### 🧠 **Phase 1 Advanced Memory System**
+### 🧠 **Advanced Memory System**
 - **Intelligent Memory Filtering**: Automatically filters out trivial information (greetings, small talk)
 - **Priority-Based Storage**: Smart classification with priority scoring (0.0-1.0)
 - **Comprehensive Fact Extraction**: Systematically extracts personal facts, relationships, and preferences
 - **Background Memory Processing**: Non-blocking memory operations using ThreadPoolExecutor
 - **Advanced Search & Ranking**: Combined scoring (similarity + priority + recency)
 - **Memory Type Classification**: Organized by personal_fact, relationship, preference, project, technical
+
+### 🔐 **Phase 1: Permanent Storage Enhancements** (v0.3.0-dev)
+- **Persistence Verification**: Automatic startup checks ensure data survives restarts
+- **Graceful Shutdown**: Signal handlers (SIGTERM/SIGINT) ensure clean termination
+- **Connection Reliability**: Retry logic and connection pooling for databases
+- **Interaction Logging**: All conversations logged to `/var/log/buddy/` with rotation
+- **Enhanced Monitoring**: Comprehensive logging with automatic rotation
+- **Neo4j Connection Pooling**: Up to 50 concurrent connections with proper management
 
 ### 🚀 **System Architecture**
 - **Gentoo/OpenRC Native**: Optimized for Gentoo Linux with OpenRC service management
@@ -182,6 +190,22 @@ rc-update show default
 - **Qdrant**: `~/qdrant/` (binary and data)
 - **Neo4j**: `~/neo4j/neo4j-community/` (installation and data)
 - **OpenRC Scripts**: `/etc/init.d/qdrant` and `/etc/init.d/neo4j`
+
+## Project Structure
+
+```
+buddy/
+├── launch_hermes_improved.py  # Main v0.2.0 with advanced memory
+├── launch_hermes_fixed.py     # Original v0.1.0 baseline
+├── examples/                  # Example scripts and demos
+├── tests/                     # Test scripts and verification tools
+├── dev/                       # Development versions and planning docs
+├── research/                  # Research papers and notes (gitignored)
+├── manage_services.sh         # Service management script
+├── install_mem0_dependencies.sh # Dependency installation
+├── requirements.txt           # Python dependencies
+└── CHANGELOG.md              # Detailed version history
+```
 
 ### Additional OpenRC Commands
 
