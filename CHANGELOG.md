@@ -5,6 +5,59 @@ All notable changes to Buddy will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-dev] - 2025-05-27
+
+### 🧠 Phase 2: Memory Consolidation & Summarization
+
+This development release introduces intelligent memory consolidation with episode tracking and smart context expansion.
+
+### Added
+
+#### 📝 **Memory Summarization System**
+- **MemorySummarizer Class**: Automatic summarization of conversation episodes using LLM
+- **Episode Boundary Detection**: Semantic similarity analysis (0.3 threshold) to detect topic changes
+- **Periodic Summarization**: Configurable intervals (every 5 interactions for testing)
+- **Summary Storage**: Summaries stored as special memory nodes with type "summary"
+- **Metadata Preservation**: Full episode metadata including interaction count, timestamp ranges, key topics
+
+#### 🎯 **Smart Context Expansion**
+- **Relevance-Based Loading**: When summarized content is referenced (>0.85 relevance), loads full original context
+- **Complete History Retrieval**: Seamlessly accesses detailed conversation history from interaction logs
+- **Enhanced User Experience**: Comprehensive responses by combining summaries with full context when needed
+- **Log Position Tracking**: Precise line number references for efficient context retrieval
+
+#### 📊 **Episode Management**
+- **Conversation Episodes**: Automatic detection and tracking of distinct conversation topics
+- **Episode Summaries**: LLM-generated summaries for completed episodes (minimum 3 interactions)
+- **Episode Linking**: Summaries linked to original interactions for detailed lookup
+- **Topic Shift Detection**: Embedding-based similarity analysis to identify conversation boundaries
+
+#### 🔧 **Enhanced Commands**
+- **`/episodes`**: List conversation episodes and summaries (schema improvements needed)
+- **`/summarize`**: Force memory summarization on demand
+- **Updated `/stats`**: Now includes interaction log size information
+
+### Technical Improvements
+
+#### 📁 **Enhanced Interaction Logging**
+- **Structured Metadata**: Episode ID, log line numbers, and memory extraction results
+- **Complete Conversation History**: Full preservation of user inputs and assistant responses
+- **Efficient Retrieval**: Line-based indexing for fast context loading
+- **JSON Lines Format**: Streamlined parsing and processing
+
+#### ⚡ **Performance Optimizations**
+- **Asynchronous Processing**: Background memory processing doesn't block conversation flow
+- **Efficient Storage**: Summaries reduce memory search space while preserving access to details
+- **Semantic Caching**: Episode boundaries reduce redundant processing
+
+### Configuration Changes
+- **Episode Similarity Threshold**: Configurable threshold for topic change detection (default: 0.3)
+- **Summary Threshold**: Configurable interaction count for periodic summarization (default: 5 for testing)
+
+### Files Added
+- **`memory_summarizer.py`**: Core summarization and context expansion logic
+- **`test_context_expansion.py`**: Testing utilities for context expansion feature
+
 ## [0.3.0-dev] - 2025-05-26
 
 ### 🔐 Phase 1: Permanent Storage Enhancements

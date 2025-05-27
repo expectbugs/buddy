@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
 """
-Buddy v0.2.0 - Advanced AI Assistant with Intelligent Memory System
-Implements Phase 1 improvements: intelligent filtering, background processing, comprehensive extraction
+Buddy v0.4.0-dev - AI Assistant with Memory Consolidation and Smart Context
+Phase 2 Implementation: Memory summarization, episode detection, and intelligent
+context expansion for efficient long-term memory management
 """
 
 import os
@@ -11,6 +12,8 @@ import subprocess
 import yaml
 import json
 import asyncio
+import signal
+import atexit
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
@@ -28,13 +31,46 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 import threading
 import queue
+from logging.handlers import RotatingFileHandler
+import numpy as np
+
+# Import the memory summarizer
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from memory_summarizer import MemorySummarizer
 
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging with rotation
+log_dir = Path("/var/log/buddy")
+log_dir.mkdir(parents=True, exist_ok=True)
+
+# Main application logger
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler(
+            log_dir / "buddy.log",
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5
+        )
+    ]
+)
 logger = logging.getLogger(__name__)
+
+# Interaction logger for append-only log
+interaction_logger = logging.getLogger('interactions')
+interaction_logger.setLevel(logging.INFO)
+interaction_handler = RotatingFileHandler(
+    log_dir / "interactions.jsonl",
+    maxBytes=50*1024*1024,  # 50MB
+    backupCount=10
+)
+interaction_handler.setFormatter(logging.Formatter('%(message)s'))
+interaction_logger.addHandler(interaction_handler)
+interaction_logger.propagate = False
 
 
 class MemoryType(Enum):
@@ -46,6 +82,8 @@ class MemoryType(Enum):
     TECHNICAL = "technical"
     CONVERSATION = "conversation"
     TEMPORARY = "temporary"
+    SUMMARY = "summary"
+    EPISODE = "episode"
 
 
 class MemoryOperation(Enum):
@@ -66,14 +104,15 @@ class MemoryCandidate:
     related_memory_id: Optional[str] = None
 
 
-class ImprovedMemorySystem:
-    """Advanced memory system with two-phase pipeline and intelligent filtering"""
+class RobustMemorySystem:
+    """Enhanced memory system with robust persistence and graceful shutdown"""
     
     def __init__(self, config):
         self.config = config
         self.llm = None
         self.qdrant = None
         self.neo4j = None
+        self.neo4j_pool = None  # Connection pool
         self.embedder = None
         self.collection_name = "hermes_advanced_memory"
         self.user_id = "default_user"
@@ -81,6 +120,7 @@ class ImprovedMemorySystem:
         self.memory_queue = queue.Queue()
         self.processing_lock = threading.Lock()
         self.memory_thread = None
+        self.shutdown_event = threading.Event()
         
         # Memory filtering criteria
         self.min_priority_threshold = 0.3
@@ -89,9 +129,158 @@ class ImprovedMemorySystem:
             "ok", "okay", "sure", "yes", "no", "maybe"
         ]
         
+        # Episode tracking
+        self.current_episode_id = str(uuid.uuid4())
+        self.previous_embedding = None
+        self.episode_similarity_threshold = 0.3  # Lower threshold = less sensitive
+        self.interaction_count = 0
+        self.last_summary_count = 0
+        self.summary_threshold = 5  # Summarize every 5 interactions for testing
+        
+        # Log line tracking
+        self.log_line_count = 0
+        
+        # Memory summarizer (initialized after components)
+        self.summarizer = None
+        
+        # Register shutdown handlers
+        self._register_shutdown_handlers()
+        
+    def _register_shutdown_handlers(self):
+        """Register handlers for graceful shutdown"""
+        # Handle SIGTERM and SIGINT
+        signal.signal(signal.SIGTERM, self._signal_handler)
+        signal.signal(signal.SIGINT, self._signal_handler)
+        
+        # Register atexit handler
+        atexit.register(self._cleanup)
+        
+    def _signal_handler(self, signum, frame):
+        """Handle shutdown signals gracefully"""
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        self.shutdown_event.set()
+        self._cleanup()
+        sys.exit(0)
+        
+    def _cleanup(self):
+        """Cleanup resources gracefully"""
+        logger.info("Starting cleanup process...")
+        
+        # Stop memory processing thread
+        if self.memory_thread and self.memory_thread.is_alive():
+            self.shutdown_event.set()
+            # Process remaining items in queue
+            logger.info(f"Processing {self.memory_queue.qsize()} remaining memory items...")
+            while not self.memory_queue.empty():
+                try:
+                    self.memory_queue.get_nowait()
+                    self.memory_queue.task_done()
+                except queue.Empty:
+                    break
+            self.memory_thread.join(timeout=5)
+            
+        # Shutdown executor
+        if self.executor:
+            self.executor.shutdown(wait=True, cancel_futures=False)
+            logger.info("ThreadPoolExecutor shut down")
+            
+        # Close Neo4j connections
+        if self.neo4j:
+            try:
+                self.neo4j.close()
+                logger.info("Neo4j connection closed")
+            except Exception as e:
+                logger.error(f"Error closing Neo4j: {e}")
+                
+        # Ensure Qdrant data is persisted
+        if self.qdrant:
+            try:
+                # Force a collection update to ensure persistence
+                collection_info = self.qdrant.get_collection(self.collection_name)
+                logger.info(f"Qdrant collection '{self.collection_name}' has {collection_info.points_count} points")
+            except Exception as e:
+                logger.error(f"Error checking Qdrant: {e}")
+                
+        logger.info("Cleanup completed")
+        
+    def verify_qdrant_persistence(self):
+        """Verify Qdrant is configured for persistence"""
+        try:
+            # Check if we can access collection info
+            collections = self.qdrant.get_collections()
+            logger.info(f"Qdrant has {len(collections.collections)} collections")
+            
+            # Create a test point to verify write capability
+            test_id = str(uuid.uuid4())
+            test_embedding = self.embedder.encode(["persistence test"])[0]
+            
+            self.qdrant.upsert(
+                collection_name=self.collection_name,
+                points=[PointStruct(
+                    id=test_id,
+                    vector=test_embedding.tolist(),
+                    payload={"test": True, "timestamp": time.time()}
+                )]
+            )
+            
+            # Verify it was written
+            retrieved = self.qdrant.retrieve(
+                collection_name=self.collection_name,
+                ids=[test_id]
+            )
+            
+            if retrieved:
+                # Clean up test point
+                self.qdrant.delete(
+                    collection_name=self.collection_name,
+                    points_selector=[test_id]
+                )
+                logger.info("✅ Qdrant persistence verification successful")
+                return True
+            else:
+                logger.error("❌ Qdrant persistence verification failed")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Qdrant persistence check failed: {e}")
+            return False
+            
+    def verify_neo4j_persistence(self):
+        """Verify Neo4j is configured for persistence"""
+        try:
+            with self.neo4j.session() as session:
+                # Create test node
+                test_id = "persistence_test_" + str(uuid.uuid4())
+                result = session.run("""
+                    CREATE (n:PersistenceTest {id: $id, timestamp: $timestamp})
+                    RETURN n.id as id
+                """, id=test_id, timestamp=time.time())
+                
+                created_id = result.single()["id"]
+                
+                # Verify it exists
+                result = session.run("""
+                    MATCH (n:PersistenceTest {id: $id})
+                    DELETE n
+                    RETURN count(n) as count
+                """, id=test_id)
+                
+                count = result.single()["count"]
+                
+                if count == 1:
+                    logger.info("✅ Neo4j persistence verification successful")
+                    return True
+                else:
+                    logger.error("❌ Neo4j persistence verification failed")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Neo4j persistence check failed: {e}")
+            return False
+    
     def initialize(self):
-        """Initialize all components"""
-        logger.info("Initializing Improved Hermes Memory System...")
+        """Initialize all components with enhanced error handling and verification"""
+        logger.info("Initializing Robust Hermes Memory System v0.3.0-dev...")
         
         # Initialize LLM
         logger.info("Loading Hermes model...")
@@ -101,9 +290,12 @@ class ImprovedMemorySystem:
             logger.error(f"Model file not found at: {model_path}")
             sys.exit(1)
             
+        # Use CPU if CUDA issues detected
+        n_gpu_layers = self.config["model"]["n_gpu_layers"] if os.environ.get('CUDA_VISIBLE_DEVICES', '') != '-1' else 0
+        
         self.llm = Llama(
             model_path=model_path,
-            n_gpu_layers=self.config["model"]["n_gpu_layers"],
+            n_gpu_layers=n_gpu_layers,
             n_ctx=self.config["model"]["n_ctx"],
             n_batch=self.config["model"]["n_batch"],
             n_threads=self.config["model"]["n_threads"],
@@ -116,50 +308,126 @@ class ImprovedMemorySystem:
         self.embedder = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
         logger.info("✅ Embedding model loaded")
         
-        # Initialize Qdrant
-        try:
-            logger.info("Connecting to Qdrant...")
-            qdrant_host = os.getenv("QDRANT_HOST", "localhost")
-            qdrant_port = int(os.getenv("QDRANT_PORT", "6333"))
-            self.qdrant = QdrantClient(host=qdrant_host, port=qdrant_port)
-            
-            # Check if collection exists, create if not
-            collections = self.qdrant.get_collections()
-            collection_exists = any(col.name == self.collection_name for col in collections.collections)
-            
-            if not collection_exists:
-                logger.info(f"Creating collection: {self.collection_name}")
-                self.qdrant.create_collection(
-                    collection_name=self.collection_name,
-                    vectors_config=VectorParams(size=384, distance=Distance.COSINE)
-                )
-            else:
-                logger.info(f"Using existing collection: {self.collection_name}")
-            logger.info("✅ Qdrant initialized")
-        except Exception as e:
-            logger.error(f"Failed to connect to Qdrant: {e}")
-            sys.exit(1)
+        # Initialize Qdrant with persistence verification
+        max_retries = 3
+        retry_count = 0
+        while retry_count < max_retries:
+            try:
+                logger.info(f"Connecting to Qdrant (attempt {retry_count + 1}/{max_retries})...")
+                qdrant_host = os.getenv("QDRANT_HOST", "localhost")
+                qdrant_port = int(os.getenv("QDRANT_PORT", "6333"))
+                self.qdrant = QdrantClient(host=qdrant_host, port=qdrant_port)
+                
+                # Check if collection exists, create if not
+                collections = self.qdrant.get_collections()
+                collection_exists = any(col.name == self.collection_name for col in collections.collections)
+                
+                if not collection_exists:
+                    logger.info(f"Creating collection: {self.collection_name}")
+                    self.qdrant.create_collection(
+                        collection_name=self.collection_name,
+                        vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+                    )
+                else:
+                    collection_info = self.qdrant.get_collection(self.collection_name)
+                    logger.info(f"Using existing collection: {self.collection_name} with {collection_info.points_count} points")
+                
+                # Verify persistence
+                if self.verify_qdrant_persistence():
+                    logger.info("✅ Qdrant initialized with persistence verified")
+                    break
+                else:
+                    raise Exception("Qdrant persistence verification failed")
+                    
+            except Exception as e:
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(f"Failed to connect to Qdrant after {max_retries} attempts: {e}")
+                    sys.exit(1)
+                else:
+                    logger.warning(f"Qdrant connection attempt {retry_count} failed, retrying...")
+                    time.sleep(2)
         
-        # Initialize Neo4j
+        # Initialize Neo4j with connection pooling and retry logic
+        retry_count = 0
+        while retry_count < max_retries:
+            try:
+                logger.info(f"Connecting to Neo4j (attempt {retry_count + 1}/{max_retries})...")
+                neo4j_username = os.getenv("NEO4J_USERNAME", "neo4j")
+                neo4j_password = os.getenv("NEO4J_PASSWORD", "password123")
+                neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+                
+                # Create driver with connection pooling
+                self.neo4j = GraphDatabase.driver(
+                    neo4j_uri,
+                    auth=(neo4j_username, neo4j_password),
+                    max_connection_lifetime=3600,  # 1 hour
+                    max_connection_pool_size=50,
+                    connection_acquisition_timeout=30.0
+                )
+                
+                # Test connection and count existing memories
+                with self.neo4j.session() as session:
+                    result = session.run("MATCH (n:HermesMemory) RETURN count(n) as count")
+                    count = result.single()["count"]
+                    logger.info(f"Found {count} existing memories in Neo4j")
+                
+                # Verify persistence
+                if self.verify_neo4j_persistence():
+                    logger.info("✅ Neo4j initialized with persistence verified")
+                    break
+                else:
+                    raise Exception("Neo4j persistence verification failed")
+                    
+            except Exception as e:
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(f"Failed to connect to Neo4j after {max_retries} attempts: {e}")
+                    sys.exit(1)
+                else:
+                    logger.warning(f"Neo4j connection attempt {retry_count} failed, retrying...")
+                    time.sleep(2)
+        
+        # Initialize memory summarizer
+        logger.info("Initializing memory summarizer...")
+        self.summarizer = MemorySummarizer(
+            llm=self.llm,
+            neo4j=self.neo4j,
+            qdrant=self.qdrant,
+            embedder=self.embedder,
+            collection_name=self.collection_name
+        )
+        logger.info("✅ Memory summarizer initialized")
+    
+    def log_interaction(self, user_input: str, assistant_response: str, memory_extracted: List[Dict]):
+        """Log interaction to append-only log file with episode tracking"""
         try:
-            logger.info("Connecting to Neo4j...")
-            neo4j_username = os.getenv("NEO4J_USERNAME", "neo4j")
-            neo4j_password = os.getenv("NEO4J_PASSWORD", "password123")
-            neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-            self.neo4j = GraphDatabase.driver(
-                neo4j_uri,
-                auth=(neo4j_username, neo4j_password)
-            )
+            # Get current log line position
+            log_file_path = log_dir / "interactions.jsonl"
+            current_line = 0
+            if log_file_path.exists():
+                with open(log_file_path, 'r') as f:
+                    current_line = sum(1 for _ in f)
             
-            # Test connection and count existing memories
-            with self.neo4j.session() as session:
-                result = session.run("MATCH (n:HermesMemory) RETURN count(n) as count")
-                count = result.single()["count"]
-                logger.info(f"Found {count} existing memories in Neo4j")
-            logger.info("✅ Neo4j initialized")
+            log_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "episode_id": self.current_episode_id,
+                "log_line": current_line,
+                "user_input": user_input,
+                "assistant_response": assistant_response,
+                "memory_extracted": [
+                    {
+                        "text": m.text,
+                        "type": m.memory_type.value,
+                        "priority": m.priority
+                    } for m in memory_extracted
+                ] if memory_extracted else []
+            }
+            interaction_logger.info(json.dumps(log_entry))
+            self.log_line_count = current_line + 1
+            self.interaction_count += 1
         except Exception as e:
-            logger.error(f"Failed to connect to Neo4j: {e}")
-            sys.exit(1)
+            logger.error(f"Failed to log interaction: {e}")
     
     def extract_memory_candidates(self, user_input: str, assistant_response: str) -> List[MemoryCandidate]:
         """Extract potential memories from an exchange using LLM"""
@@ -551,29 +819,71 @@ JSON array:"""
             pass  # Don't fail if update doesn't work
     
     def process_interaction_background(self, user_input: str, assistant_response: str):
-        """Process interaction in background thread"""
+        """Process interaction in background thread with episode detection"""
+        # Generate embedding for episode detection
+        user_embedding = self.embedder.encode([user_input])[0]
+        
+        # Check for episode boundary
+        if self.previous_embedding is not None:
+            if self.summarizer.detect_episode_boundary(user_embedding, self.previous_embedding):
+                logger.info(f"Episode boundary detected, ending episode {self.current_episode_id}")
+                # Queue episode summary creation
+                self.memory_queue.put(("EPISODE_END", self.current_episode_id))
+                # Start new episode
+                self.current_episode_id = str(uuid.uuid4())
+                logger.info(f"Started new episode {self.current_episode_id}")
+        
+        self.previous_embedding = user_embedding
+        
         # Add to queue for processing
         self.memory_queue.put((user_input, assistant_response))
+        
+        # Check if we need periodic summarization
+        if self.summarizer.should_summarize(self.interaction_count, self.last_summary_count):
+            logger.info("Triggering periodic summarization")
+            self.memory_queue.put(("SUMMARIZE", self.interaction_count))
     
     def _memory_processor(self):
         """Background thread that processes memory queue"""
-        while True:
+        while not self.shutdown_event.is_set():
             try:
-                # Get from queue (blocks until item available)
-                user_input, assistant_response = self.memory_queue.get(timeout=1)
+                # Get from queue (blocks until item available or timeout)
+                item = self.memory_queue.get(timeout=1)
                 
-                # Extract memory candidates
-                candidates = self.extract_memory_candidates(user_input, assistant_response)
-                
-                # Process each candidate
-                for candidate in candidates:
-                    operation, related_id = self.determine_memory_operation(candidate)
+                # Handle different types of tasks
+                if isinstance(item, tuple) and len(item) == 2:
+                    task_type = item[0]
                     
-                    if operation == MemoryOperation.ADD:
-                        self.add_memory_advanced(candidate)
-                    elif operation == MemoryOperation.UPDATE and related_id:
-                        self.update_memory(related_id, candidate)
-                    # SKIP and DELETE operations do nothing for now
+                    if task_type == "EPISODE_END":
+                        # Create episode summary
+                        episode_id = item[1]
+                        logger.info(f"Creating summary for episode {episode_id}")
+                        self.summarizer.create_episode_summary(episode_id, self.user_id)
+                        
+                    elif task_type == "SUMMARIZE":
+                        # Periodic summarization
+                        count = item[1]
+                        logger.info(f"Starting periodic summarization at {count} interactions")
+                        self._perform_periodic_summarization()
+                        
+                    else:
+                        # Regular memory processing
+                        user_input, assistant_response = item
+                        
+                        # Extract memory candidates
+                        candidates = self.extract_memory_candidates(user_input, assistant_response)
+                        
+                        # Log the interaction with extracted memories
+                        self.log_interaction(user_input, assistant_response, candidates)
+                        
+                        # Process each candidate
+                        for candidate in candidates:
+                            operation, related_id = self.determine_memory_operation(candidate)
+                            
+                            if operation == MemoryOperation.ADD:
+                                self.add_memory_advanced(candidate)
+                            elif operation == MemoryOperation.UPDATE and related_id:
+                                self.update_memory(related_id, candidate)
                 
                 self.memory_queue.task_done()
             except queue.Empty:
@@ -581,8 +891,50 @@ JSON array:"""
             except Exception as e:
                 logger.error(f"Error in memory processor: {e}")
     
+    def _perform_periodic_summarization(self):
+        """Perform periodic summarization of recent interactions"""
+        try:
+            # Calculate line range for summarization
+            start_line = self.last_summary_count
+            end_line = self.interaction_count - 1
+            
+            # Load interactions for summarization
+            interactions = self.summarizer.load_interaction_range(start_line, end_line)
+            
+            if interactions:
+                # Generate and store summary
+                summary = self.summarizer.generate_summary(interactions, summary_type="periodic")
+                if summary:
+                    self.summarizer.store_summary_memory(summary, self.user_id)
+                    self.last_summary_count = self.interaction_count
+                    logger.info(f"Created periodic summary covering {len(interactions)} interactions")
+        except Exception as e:
+            logger.error(f"Failed to perform periodic summarization: {e}")
+    
+    def get_memory_with_context(self, memory: Dict, relevance_score: float) -> Dict:
+        """Get memory with optional full context expansion"""
+        if memory.get("memory_type") == "summary" and relevance_score > 0.85:
+            # High relevance - load full context
+            metadata = memory.get("metadata", {})
+            if metadata:
+                full_context = self.summarizer.load_full_context(metadata)
+                if full_context:
+                    return {
+                        "summary": memory["text"],
+                        "full_context": full_context,
+                        "expanded": True,
+                        "relevance": relevance_score
+                    }
+        
+        # Return just the memory text for non-summaries or lower relevance
+        return {
+            "text": memory["text"],
+            "expanded": False,
+            "relevance": relevance_score
+        }
+    
     def get_conversation_context(self, user_input: str) -> str:
-        """Get relevant context for the conversation"""
+        """Get relevant context for the conversation with smart expansion"""
         # Search for relevant memories with different types
         personal_memories = self.search_memories_advanced(
             user_input, 
@@ -602,13 +954,29 @@ JSON array:"""
             memory_types=[MemoryType.CONVERSATION]
         )
         
-        # Build context
+        # Check for summaries in all memory types
+        all_memories = personal_memories + preference_memories + recent_memories
+        summaries = self.search_memories_advanced(
+            user_input,
+            limit=2,
+            memory_types=[MemoryType.SUMMARY, MemoryType.EPISODE]
+        )
+        all_memories.extend(summaries)
+        
+        # Build context with smart expansion
         context = ""
+        expanded_any = False
         
         if personal_memories:
             context += "Personal information:\n"
             for mem in personal_memories:
-                context += f"- {mem['text']}\n"
+                expanded_mem = self.get_memory_with_context(mem, mem.get('similarity', 0.5))
+                if expanded_mem['expanded']:
+                    context += f"- [Summary] {expanded_mem['summary']}\n"
+                    context += f"  [Expanded context]:\n{expanded_mem['full_context']}\n"
+                    expanded_any = True
+                else:
+                    context += f"- {mem['text']}\n"
             context += "\n"
         
         if preference_memories:
@@ -622,20 +990,36 @@ JSON array:"""
             for mem in recent_memories:
                 context += f"- {mem['text']}\n"
             context += "\n"
+            
+        # Include high-relevance summaries
+        if summaries:
+            context += "Relevant summaries:\n"
+            for mem in summaries:
+                expanded_mem = self.get_memory_with_context(mem, mem.get('similarity', 0.5))
+                if expanded_mem['expanded']:
+                    context += f"- [Summary] {expanded_mem['summary']}\n"
+                    if not expanded_any:  # Only show one expanded context
+                        context += f"  [Full conversation context]:\n{expanded_mem['full_context'][:1000]}...\n"
+                        expanded_any = True
+                else:
+                    context += f"- {mem['text']}\n"
+            context += "\n"
         
         return context
     
     def chat(self):
         """Interactive chat with improved memory"""
         print("\n" + "="*60)
-        print("🤖 Buddy v0.2.0 - AI Assistant with Advanced Memory System")
+        print("🤖 Buddy v0.4.0-dev - AI Assistant with Memory Consolidation")
         print("="*60)
         print("\nCommands:")
-        print("  /memory  - View stored memories by type")
-        print("  /clear   - Clear all memories")
-        print("  /stats   - View memory statistics")
-        print("  /exit    - Exit the chat")
-        print("\nStart chatting! I'll remember our important conversations.\n")
+        print("  /memory    - View stored memories by type")
+        print("  /clear     - Clear all memories")
+        print("  /stats     - View memory statistics")
+        print("  /summarize - Force memory summarization")
+        print("  /episodes  - List conversation episodes")
+        print("  /exit      - Exit the chat")
+        print("\nStart chatting! I'll remember and intelligently summarize our conversations.\n")
         
         while True:
             try:
@@ -665,6 +1049,16 @@ JSON array:"""
                 if user_input.lower() == '/clear':
                     count = self.clear_memories()
                     print(f"✅ Cleared {count} memories\n")
+                    continue
+                
+                if user_input.lower() == '/summarize':
+                    print("Forcing memory summarization...")
+                    self._perform_periodic_summarization()
+                    print("✅ Summarization complete\n")
+                    continue
+                
+                if user_input.lower() == '/episodes':
+                    self.show_episodes()
                     continue
                 
                 # Get conversation context
@@ -762,9 +1156,43 @@ Assistant: """
                     if record['avg_priority']:
                         print(f"{record['type']}: {record['avg_priority']:.2f}")
                 
+                # Check interaction log size
+                log_file = log_dir / "interactions.jsonl"
+                if log_file.exists():
+                    size_mb = log_file.stat().st_size / (1024 * 1024)
+                    print(f"\nInteraction log size: {size_mb:.2f} MB")
+                
                 print()
         except Exception as e:
             logger.error(f"Failed to show memory stats: {e}")
+    
+    def show_episodes(self):
+        """Display conversation episodes"""
+        try:
+            with self.neo4j.session() as session:
+                # Get episode summaries
+                result = session.run("""
+                    MATCH (m:HermesMemory {user_id: $user_id})
+                    WHERE m.memory_type = 'episode' OR m.memory_type = 'summary'
+                    RETURN m.text, m.timestamp, m.summary_type, m.interaction_count
+                    ORDER BY m.timestamp DESC
+                    LIMIT 10
+                """, user_id=self.user_id)
+                
+                print("\n📖 Conversation Episodes & Summaries:")
+                print("-" * 50)
+                
+                for record in result:
+                    timestamp = datetime.fromtimestamp(record['m.timestamp']).strftime('%Y-%m-%d %H:%M')
+                    summary_type = record.get('m.summary_type', 'unknown')
+                    interaction_count = record.get('m.interaction_count', 0)
+                    
+                    print(f"\n[{timestamp}] {summary_type.capitalize()} ({interaction_count} interactions)")
+                    print(f"  {record['m.text'][:100]}...")
+                
+                print()
+        except Exception as e:
+            logger.error(f"Failed to show episodes: {e}")
     
     def clear_memories(self):
         """Clear all memories"""
@@ -840,7 +1268,7 @@ def load_config():
         with open(config_path, 'r') as f:
             return yaml.safe_load(f)
     else:
-        # Default config
+        # Default config with explicit Qdrant storage path
         model_path = os.getenv("MODEL_PATH", 
                               os.path.expanduser("~/models/Hermes-2-Pro-Mistral-10.7B-Q6_K/hermes-2-pro-mistral-10.7b.Q6_K.gguf"))
         return {
@@ -854,6 +1282,9 @@ def load_config():
                 "top_p": 0.9,
                 "repeat_penalty": 1.1,
                 "max_tokens": 2048
+            },
+            "qdrant": {
+                "storage_path": "/var/lib/qdrant/storage"
             }
         }
 
@@ -868,19 +1299,19 @@ def main():
     config = load_config()
     
     # Create and initialize system
-    system = ImprovedMemorySystem(config)
+    system = RobustMemorySystem(config)
     system.initialize()
     
     # Start memory processor thread
-    system.memory_thread = threading.Thread(target=system._memory_processor, daemon=True)
+    system.memory_thread = threading.Thread(target=system._memory_processor)
     system.memory_thread.start()
     
-    # Start chat
-    system.chat()
-    
-    # Cleanup
-    system.neo4j.close()
-    system.executor.shutdown()
+    try:
+        # Start chat
+        system.chat()
+    finally:
+        # Cleanup will be handled by shutdown handlers
+        logger.info("Shutting down...")
 
 
 if __name__ == "__main__":
