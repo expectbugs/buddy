@@ -1,4 +1,4 @@
-# Buddy v0.1.0 - Advanced AI Assistant with Intelligent Memory System
+# Buddy v0.2.0 - Advanced AI Assistant with Intelligent Memory System
 
 Buddy is an advanced AI assistant built on Hermes-2-Pro-Mistral-10.7B with a sophisticated Phase 1 memory system featuring intelligent filtering, background processing, and comprehensive fact extraction. Optimized for NVIDIA RTX 3090 on Gentoo Linux with OpenRC.
 

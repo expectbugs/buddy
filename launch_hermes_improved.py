@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 """
-Improved Hermes-2-Pro-Mistral-10.7B Launcher with Advanced Memory System
-Implements Phase 1 improvements from MEMORY_IMPROVEMENT_REPORT.md
+Buddy v0.2.0 - Advanced AI Assistant with Intelligent Memory System
+Implements Phase 1 improvements: intelligent filtering, background processing, comprehensive extraction
 """
 
 import os
@@ -628,7 +628,7 @@ JSON array:"""
     def chat(self):
         """Interactive chat with improved memory"""
         print("\n" + "="*60)
-        print("🤖 Buddy - AI Assistant with Advanced Memory System")
+        print("🤖 Buddy v0.2.0 - AI Assistant with Advanced Memory System")
         print("="*60)
         print("\nCommands:")
         print("  /memory  - View stored memories by type")
