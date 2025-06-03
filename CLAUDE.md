@@ -1,0 +1,5 @@
+- Rule 1: NEVER disable or remove a feature to fix a bug or error.
+- Rule 2: NEVER fix an error or bug by hiding it.
+- Rule 3: NO silent fallbacks or silent failures, all problems should be loud and proud.
+- Rule 4: Always check online documentation of every packaged used and do everything the officially recommended way.
+- Rule 5: Clean up your mess.  Remove any temporary and/or outdated files or scripts that were only meant to be used once and no longer serve a purpose.

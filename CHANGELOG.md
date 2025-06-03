@@ -5,37 +5,103 @@ All notable changes to Buddy will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2025-06-03
 
-### 🐛 Critical QWQ Response Display & Memory System Fixes
+### 🎉 Major Release: Production-Ready Memory System with mem0
 
-These fixes address the critical issue where users could only see reasoning but not actual responses, along with several memory system improvements.
+This release represents a complete overhaul of the memory system, transitioning from a custom implementation to the industry-standard mem0 library with comprehensive fixes for all identified issues.
+
+### Added
+
+#### 🧠 **mem0 Integration**
+- **Official mem0 Library**: Integrated mem0ai v0.1.102 for professional-grade memory management
+- **Graph Memory Support**: Enabled Neo4j graph store for relationship tracking
+- **Dual Storage**: Hybrid vector (Qdrant) and graph (Neo4j) memory storage
+- **Custom Memory Fixes**: `mem0_fixes.py` utility library for enhanced functionality
+- **Configuration Templates**: `mem0_custom_prompts.py` for advanced memory handling
+
+#### 🛠️ **Memory Operations**
+- **Proper Deletion**: "forget X" commands now actually delete memories using mem0's `delete()` API
+- **Deduplication**: Automatic detection and merging of similar memories (85% threshold)
+- **Entity Sanitization**: Clean entity extraction removing system IDs and special characters
+- **Possessive Parsing**: Correctly interprets "X's boss is Y" relationships
+
+#### 🎯 **Enhanced Features**
+- **Debug Mode**: Set `DEBUG=true` for HTTP request logging
+- **Improved Commands**: Clear memory display with deduplication
+- **Better Error Handling**: Comprehensive error messages and logging
+- **Session Management**: Proper user ID tracking (adam_001)
 
 ### Fixed
 
-#### 🚨 **Critical Response Display Fix**
-- **QWQ Response Parser**: Fixed model output to include both reasoning AND answers after </think> tag
-- **Prompt Enhancement**: Updated system prompt to explicitly instruct closing </think> and providing answers
-- **Error on Missing Answer**: Parser now throws explicit error if model fails to provide answer
-- **Interaction Logging**: Fixed to log actual answers instead of reasoning in interactions.jsonl
+#### 🐛 **Critical Memory Issues**
+- **Memory Forgetting**: Fixed - "forget" commands now delete memories instead of adding "wants to forget" entries
+- **Boss Hierarchy**: Fixed - "Josh's boss is Dave" correctly creates "Dave manages Josh" relationship
+- **Duplicate Memories**: Fixed - Automatic deduplication prevents redundant storage
+- **Entity Extraction**: Fixed - No more malformed relationships like `user_001 -> expresses -> long_string`
+- **Memory Updates**: Fixed - Updates now replace old information instead of creating duplicates
 
-#### 💾 **Memory System Fixes**
-- **Episode Summary Errors**: Added validation for missing timestamp fields with explicit error messages
-- **Missing Memory Type**: Added 'factual_statement' to allowed memory types enum
-- **ID Field in Qdrant**: Added 'id' field to payload for easier memory access and tracking
-- **Neo4j Schema**: Flattened metadata storage to match actual implementation
+#### 🔧 **Technical Fixes**
+- **HTTP Request Suppression**: Cleaned up verbose HTTP logs unless in debug mode
+- **Word Boundary Matching**: Precise entity matching in forget operations
+- **Memory ID Handling**: Proper memory ID validation before deletion
+- **Relationship Cleanup**: Filters out system-generated noise from graph relationships
 
-#### 🔍 **Database Integrity**
-- **Missing Fields Detection**: Identified all memories missing ID fields in existing data
-- **Metadata Structure**: Discovered Neo4j doesn't use 'metadata' field, stores flattened
-- **Summary Storage**: Verified summaries are stored with proper structure in both databases
+### Changed
 
-### Technical Details
-- Enhanced QWQ prompt to ensure proper response generation
-- Modified response parser to enforce answer generation after reasoning
-- Fixed interaction logging to store answers not reasoning
-- Added comprehensive error messages for debugging
-- Validated all memory storage includes proper ID fields
+#### 📁 **Project Structure**
+- **Main Script**: Consolidated to `run.py` (was launch_mem0_properly_fixed.py)
+- **Archive Directory**: Old scripts moved to `archive/` (gitignored)
+- **Clean Repository**: Removed temporary files, logs, and test artifacts
+- **Updated .gitignore**: Added archive/, memory files, and test outputs
+
+#### 🏗️ **Architecture**
+- **Removed Custom Memory**: Fully transitioned to mem0 from buddy_memory system
+- **Simplified Launch**: Single entry point instead of multiple launcher scripts
+- **Professional Structure**: Production-ready codebase with proper organization
+
+### Technical Implementation
+
+#### Memory Deletion
+```python
+# Actually deletes memories instead of marking
+self.memory.delete(memory_id=memory_id)
+```
+
+#### Possessive Relationships
+```python
+# "Josh's boss is Dave" → Dave manages Josh
+ParsedRelationship(subject="dave", relation="manages", object="josh")
+```
+
+#### Deduplication
+```python
+# 85% similarity threshold for automatic merging
+similarity = SequenceMatcher(None, mem1, mem2).ratio()
+if similarity >= 0.85: # Merge or skip
+```
+
+### Migration from Previous Versions
+
+1. **Clear Old Data**: Run `rm -rf storage/ logs/ *.db`
+2. **Update Configuration**: Ensure Neo4j and Qdrant are running
+3. **Use New Script**: Run `python run.py` instead of old launchers
+
+### Removed
+
+- All intermediate launcher scripts (moved to archive/)
+- Custom buddy_memory implementation (using mem0 instead)
+- Test files and temporary scripts
+- Debugging artifacts and logs
+
+### Dependencies
+
+- mem0ai==0.1.102
+- Neo4j (bolt://localhost:7687)
+- Qdrant (http://localhost:6333)
+- OpenAI API (for embeddings and LLM)
+
+---
 
 ## [0.4.2] - 2025-05-27
 

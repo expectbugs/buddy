@@ -31,11 +31,13 @@ mem0:
       username: "neo4j"
       password: "password123"
   
-  # LLM configuration (using OpenAI for now - will be replaced)
+  # LLM configuration (using Phi-3 mini for memory operations)
   llm:
     provider: "openai"
     config:
-      model: "gpt-4o-mini"
+      model: "phi-3-mini"
+      api_base: "http://localhost:1235/v1"
+      api_key: "dummy"
   
   # Embedder configuration
   embedder:

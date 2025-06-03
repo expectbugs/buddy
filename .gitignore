@@ -65,3 +65,10 @@ env/
 # Neo4j and Qdrant data
 data/
 qdrant_storage/
+
+# Archive directory (old files)
+archive/
+
+# Memory system files
+.qdrant-initialized
+memory_cleanup_report.json
