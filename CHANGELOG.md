@@ -5,6 +5,66 @@ All notable changes to Buddy will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2025-06-04
+
+### 🎯 Phase 2 Enhanced Memory & Official mem0 Compliance
+
+This release completes Phase 2 of the context expansion system and restores official mem0 behavior by removing custom filtering that was blocking important information from being processed.
+
+### Added
+
+#### 🔧 **Phase 2 Enhanced Memory System**
+- **EnhancedMemory Wrapper**: `enhanced_memory.py` provides transparent wrapper around mem0 with automatic context linking
+- **Automatic Metadata Enhancement**: All memories now include timestamps, lookup codes, and version tracking
+- **Context Linking**: Full conversations automatically get linked to context logs via lookup codes
+- **Backward Compatibility**: 100% compatible with existing mem0 API - no breaking changes
+
+#### 🛠️ **System Management Tools**
+- **Fresh Start Script**: `fresh_start.py` for complete database and log cleanup
+- **Memory Extraction Research**: Comprehensive documentation of mem0's official extraction behavior
+
+### Fixed
+
+#### 🐛 **Critical mem0 Compliance Issues**
+- **Removed Custom Filtering**: Eliminated non-official pre-filtering that was blocking important user information
+- **Restored LLM Decision Making**: mem0's LLM now processes all input as officially designed
+- **Fixed Information Loss**: User messages with mixed content (e.g., introductions + time questions) now get properly processed
+- **Official API Usage**: All memory operations now use mem0's official methods and behavior
+
+### Changed
+
+#### 🔄 **Memory Processing Behavior**
+- **Trust mem0's LLM**: Let mem0's extraction prompts decide what's important instead of custom regex filtering
+- **Full Message Processing**: All user input reaches mem0's LLM for intelligent fact extraction
+- **Enhanced Context Tracking**: Every memory operation automatically tracked with context metadata
+- **Transparent Enhancement**: Phase 2 features work seamlessly without changing user experience
+
+### Technical
+
+#### 📂 **New Files**
+- `enhanced_memory.py` - Phase 2 memory wrapper with automatic enhancements
+- `fresh_start.py` - Database and log cleanup utility
+- `MEM0_MEMORY_EXTRACTION_RESEARCH.md` - Research documentation on mem0's official behavior
+
+#### 🏗️ **Architecture Improvements**
+- **Wrapper Pattern**: EnhancedMemory wraps mem0 without modifying its core behavior
+- **Automatic Context Linking**: Context logs linked to memories via lookup codes in metadata
+- **Official Compliance**: Removed all custom filtering to match mem0's intended operation
+- **Phase 1 Integration**: Context logging works seamlessly with Phase 2 enhancements
+
+### Migration Notes
+- Existing memories continue to work unchanged
+- New memories automatically get enhanced metadata
+- Context logging happens transparently for all conversations
+- No user interface changes - all improvements are under the hood
+- Fresh start script available for complete system reset if needed
+
+### Developer Notes
+- All mem0 API calls now use official methods and parameters
+- Custom filtering removed in favor of mem0's LLM-based extraction
+- EnhancedMemory provides additive features without breaking compatibility
+- System now follows mem0's official documentation patterns exactly
+
 ## [1.1.0] - 2025-06-04
 
 ### 🚀 Phase 1 Context System & Quality Improvements

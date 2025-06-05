@@ -23,6 +23,9 @@ from context_logger import ContextLogger
 from context_bridge import ContextBridge
 from temporal_utils import inject_temporal_awareness, get_current_datetime_info
 
+# Phase 2 Enhanced Memory System
+from enhanced_memory import EnhancedMemory
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -67,20 +70,17 @@ class ImprovedMem0Assistant:
         }
         
         try:
-            self.memory = Memory.from_config(config_dict=self.config)
+            # Initialize base mem0 instance
+            base_memory = Memory.from_config(config_dict=self.config)
+            
+            # Wrap with EnhancedMemory for Phase 2 functionality
+            self.memory = EnhancedMemory(base_memory)
+            
             self.openai_client = OpenAI()
             logger.info("Successfully initialized mem0 with graph memory support")
+            logger.info("Successfully initialized Phase 2 enhanced memory system")
         except Exception as e:
-            logger.error(f"Failed to initialize mem0: {e}")
-            raise
-        
-        # Initialize Phase 1 Context System
-        try:
-            self.context_logger = ContextLogger()
-            self.context_bridge = ContextBridge(self.context_logger)
-            logger.info("Successfully initialized Phase 1 context logging system")
-        except Exception as e:
-            logger.error(f"Failed to initialize context system: {e}")
+            logger.error(f"Failed to initialize enhanced memory system: {e}")
             raise
         
         # Track entities to forget
@@ -141,44 +141,6 @@ class ImprovedMem0Assistant:
         
         return False
     
-    def should_store_as_memory(self, message: str) -> bool:
-        """Determine if a message should be stored as a memory/relationship"""
-        # Skip commands
-        if message.lower().strip() in ['memories', 'relationships', 'quit', 'exit']:
-            return False
-        
-        # Skip search commands
-        if message.lower().startswith(('search ', 'search relationships', 'forget ')):
-            return False
-        
-        # Skip typos and very short messages
-        if len(message.strip()) < 5:
-            return False
-        
-        # Skip messages that are mostly special characters or numbers
-        alpha_chars = sum(c.isalpha() for c in message)
-        if alpha_chars < len(message) * 0.3:
-            return False
-        
-        # Skip meta-commentary about the system and temporal queries
-        skip_patterns = [
-            r'the search itself is not',
-            r'search.*is not.*relationship',
-            r'lol',
-            r'^(hello|hi|hey|thanks|thank you|ok|okay)$',
-            r'what.*time.*is.*it',
-            r'current.*time',
-            r'current.*date',
-            r'what.*date.*is.*it',
-            r'what.*day.*is.*it',
-            r'greetings.*what.*is.*the.*current'
-        ]
-        for pattern in skip_patterns:
-            if re.search(pattern, message.lower()):
-                return False
-        
-        return True
-    
     def check_for_duplicates(self, new_memory: str, user_id: str, threshold: float = 0.85) -> Optional[str]:
         """Check if a similar memory already exists"""
         all_memories = self.memory.get_all(user_id=user_id)
@@ -234,25 +196,7 @@ class ImprovedMem0Assistant:
             )
             assistant_response = response.choices[0].message.content
             
-            # Log the full context interaction first (Phase 1 Context System)
-            try:
-                lookup_code = self.context_logger.log_interaction(
-                    user_input=message,
-                    assistant_response=assistant_response,
-                    reasoning=None,  # Could add reasoning from QWQ-style models later
-                    metadata={
-                        "user_id": user_id,
-                        "model": "gpt-4o-mini",
-                        "temporal_injected": True,
-                        "datetime_info": get_current_datetime_info()
-                    }
-                )
-                logger.debug(f"Context logged with lookup code: {lookup_code}")  # Changed to debug level
-            except Exception as e:
-                logger.error(f"CONTEXT LOGGING FAILED: {e}")
-                raise  # Fail loudly per Rule 3
-            
-            # Add the conversation to memory
+            # Add the conversation to memory (EnhancedMemory handles context logging automatically)
             # But first, check for special patterns like possessive relationships
             possessive = self.parse_possessive_relationship(message)
             if possessive:
@@ -265,18 +209,15 @@ class ImprovedMem0Assistant:
                 if hasattr(result, 'get') and 'relationships' in str(result):
                     logger.info(f"Relationship extracted: {possessive['relationship']}")
             else:
-                # Only add to memory if the message is meaningful
-                if self.should_store_as_memory(message):
-                    conversation = [
-                        {"role": "user", "content": message},
-                        {"role": "assistant", "content": assistant_response}
-                    ]
-                    result = self.memory.add(conversation, user_id=user_id)
-                    # Log any relationships that were extracted
-                    if hasattr(result, 'get') and 'relationships' in str(result):
-                        logger.info(f"Memory added with potential relationships from: {message[:50]}...")
-                else:
-                    logger.info(f"Skipped storing as memory (filtered): {message[:50]}...")
+                # Normal memory addition - let mem0's LLM decide what to extract
+                conversation = [
+                    {"role": "user", "content": message},
+                    {"role": "assistant", "content": assistant_response}
+                ]
+                result = self.memory.add(conversation, user_id=user_id)
+                # Log any relationships that were extracted
+                if hasattr(result, 'get') and 'relationships' in str(result):
+                    logger.info(f"Memory added with potential relationships from: {message[:50]}...")
             
             return assistant_response
             
