@@ -5,6 +5,68 @@ All notable changes to Buddy will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2025-06-04
+
+### 🚀 Phase 1 Context System & Quality Improvements
+
+This release implements Phase 1 of the context expansion system and resolves critical issues with inappropriate memory storage and system stability.
+
+### Added
+
+#### 📋 **Phase 1 Context System**
+- **Full Context Logging**: `context_logger.py` logs every conversation with unique lookup codes (CTX-timestamp-uuid)
+- **Context Bridge**: `context_bridge.py` connects mem0 memories with full conversation history
+- **Temporal Awareness**: `temporal_utils.py` provides current date/time awareness without storing it as memories
+- **Context Expansion Plan**: Comprehensive roadmap for smart context expansion in future phases
+
+#### 🔧 **Enhanced Memory Management**
+- **Smart Filtering**: Added `should_store_as_memory()` to prevent inappropriate content from being stored
+- **Command Filtering**: System commands ('memories', 'search', 'forget') no longer create relationships
+- **Temporal Filtering**: Date/time requests don't get stored as permanent memories
+- **Meta-commentary Filter**: Casual responses and typos are filtered out
+
+### Fixed
+
+#### 🐛 **Critical Bug Fixes**
+- **Aggressive Entity Extraction**: Fixed mem0 creating relationships from every conversation fragment
+- **Temporal Memory Pollution**: Stopped current date/time from being stored as memories
+- **Context Log Visibility**: Moved context logging messages from user view to debug level
+- **Hardcoded User Information**: Removed personal information from system prompts
+- **Relationship Display**: Restored missing relationship output in 'memories' command
+
+#### 🗄️ **Database Cleanup**
+- **Neo4j Reset**: Cleared all stale relationship data (removed 35+ inappropriate relationships)
+- **Qdrant Reset**: Recreated clean vector storage collections
+- **Fresh Start**: System now begins with clean slate for proper relationship building
+
+### Changed
+
+#### 🔄 **Behavior Improvements**
+- **System Prompt**: Removed hardcoded assumptions about user identity
+- **Memory Storage**: Only meaningful conversations are now stored as memories
+- **Error Handling**: All errors fail loudly (no silent failures per Rule 3)
+- **Code Organization**: Moved legacy files to archive directory
+
+### Technical
+
+#### 📂 **New Files**
+- `context_logger.py` - Full conversation logging with lookup codes
+- `context_bridge.py` - Memory-to-context linking system  
+- `temporal_utils.py` - Date/time utilities for AI awareness
+- `context_expansion_implementation_plan.md` - Roadmap for Phase 2-4
+- `future_features.txt` - Feature ideas for upcoming releases
+
+#### 🧹 **Repository Cleanup**
+- Archived unused `mem0_custom_prompts.py` and `mem0_fixes.py`
+- Organized codebase for Phase 2 development
+- Clean git status with only active development files
+
+### Migration Notes
+- Existing installations will start with a clean memory slate
+- Previous relationship data has been reset for quality improvement
+- Context logging is automatic for all new conversations
+- No breaking changes to user interface
+
 ## [1.0.0] - 2025-06-03
 
 ### 🎉 Major Release: Production-Ready Memory System with mem0

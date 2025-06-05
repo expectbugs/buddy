@@ -1,0 +1,13 @@
+Future Feature Ideas for Buddy Memory System
+============================================
+
+1. Memory visualization - Graph/network view of relationships
+2. Memory importance scoring - Weight memories by frequency/recency
+3. Context windows - Time-based or conversation-based memory scopes
+4. Memory chains - Link related memories together
+5. Memory templates - Structured formats for specific types (tasks, people, preferences)
+6. Multi-user memory sharing - Shared knowledge bases
+7. Memory export/import - Backup and restore capabilities
+8. Semantic memory search - Natural language queries across memories
+9. Memory analytics - Usage patterns, most accessed memories
+10. Memory versioning - Track how memories evolve over time

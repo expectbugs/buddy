@@ -18,6 +18,11 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from difflib import SequenceMatcher
 
+# Phase 1 Context System imports
+from context_logger import ContextLogger
+from context_bridge import ContextBridge
+from temporal_utils import inject_temporal_awareness, get_current_datetime_info
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -67,6 +72,15 @@ class ImprovedMem0Assistant:
             logger.info("Successfully initialized mem0 with graph memory support")
         except Exception as e:
             logger.error(f"Failed to initialize mem0: {e}")
+            raise
+        
+        # Initialize Phase 1 Context System
+        try:
+            self.context_logger = ContextLogger()
+            self.context_bridge = ContextBridge(self.context_logger)
+            logger.info("Successfully initialized Phase 1 context logging system")
+        except Exception as e:
+            logger.error(f"Failed to initialize context system: {e}")
             raise
         
         # Track entities to forget
@@ -127,6 +141,44 @@ class ImprovedMem0Assistant:
         
         return False
     
+    def should_store_as_memory(self, message: str) -> bool:
+        """Determine if a message should be stored as a memory/relationship"""
+        # Skip commands
+        if message.lower().strip() in ['memories', 'relationships', 'quit', 'exit']:
+            return False
+        
+        # Skip search commands
+        if message.lower().startswith(('search ', 'search relationships', 'forget ')):
+            return False
+        
+        # Skip typos and very short messages
+        if len(message.strip()) < 5:
+            return False
+        
+        # Skip messages that are mostly special characters or numbers
+        alpha_chars = sum(c.isalpha() for c in message)
+        if alpha_chars < len(message) * 0.3:
+            return False
+        
+        # Skip meta-commentary about the system and temporal queries
+        skip_patterns = [
+            r'the search itself is not',
+            r'search.*is not.*relationship',
+            r'lol',
+            r'^(hello|hi|hey|thanks|thank you|ok|okay)$',
+            r'what.*time.*is.*it',
+            r'current.*time',
+            r'current.*date',
+            r'what.*date.*is.*it',
+            r'what.*day.*is.*it',
+            r'greetings.*what.*is.*the.*current'
+        ]
+        for pattern in skip_patterns:
+            if re.search(pattern, message.lower()):
+                return False
+        
+        return True
+    
     def check_for_duplicates(self, new_memory: str, user_id: str, threshold: float = 0.85) -> Optional[str]:
         """Check if a similar memory already exists"""
         all_memories = self.memory.get_all(user_id=user_id)
@@ -142,7 +194,10 @@ class ImprovedMem0Assistant:
         return None
     
     def process_message(self, message: str, user_id: str) -> str:
-        """Process user message with improved memory handling"""
+        """Process user message with improved memory handling and context logging"""
+        
+        # Add temporal awareness to the message
+        temporal_message = inject_temporal_awareness(message)
         
         # First, check if this is a forget request
         if self.process_forget_request(message, user_id):
@@ -164,17 +219,12 @@ class ImprovedMem0Assistant:
         context = "\n".join(f"- {mem}" for mem in memories_list) if memories_list else "No previous memories."
         system_prompt = f"""You are a helpful AI assistant with the following memories about the user:
 
-{context}
-
-Important: 
-- The user's name is Adam (not user_001)
-- When discussing work relationships, be precise about who manages whom
-- If corrected about facts, acknowledge the correction"""
+{context}"""
         
-        # Generate response
+        # Generate response with temporal awareness
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": message}
+            {"role": "user", "content": temporal_message}
         ]
         
         try:
@@ -184,22 +234,49 @@ Important:
             )
             assistant_response = response.choices[0].message.content
             
+            # Log the full context interaction first (Phase 1 Context System)
+            try:
+                lookup_code = self.context_logger.log_interaction(
+                    user_input=message,
+                    assistant_response=assistant_response,
+                    reasoning=None,  # Could add reasoning from QWQ-style models later
+                    metadata={
+                        "user_id": user_id,
+                        "model": "gpt-4o-mini",
+                        "temporal_injected": True,
+                        "datetime_info": get_current_datetime_info()
+                    }
+                )
+                logger.debug(f"Context logged with lookup code: {lookup_code}")  # Changed to debug level
+            except Exception as e:
+                logger.error(f"CONTEXT LOGGING FAILED: {e}")
+                raise  # Fail loudly per Rule 3
+            
             # Add the conversation to memory
             # But first, check for special patterns like possessive relationships
             possessive = self.parse_possessive_relationship(message)
             if possessive:
                 # Add the clarified fact instead
-                self.memory.add(
+                result = self.memory.add(
                     [{"role": "user", "content": possessive["fact"]}],
                     user_id=user_id
                 )
+                # Log relationship extraction if available
+                if hasattr(result, 'get') and 'relationships' in str(result):
+                    logger.info(f"Relationship extracted: {possessive['relationship']}")
             else:
-                # Normal memory addition
-                conversation = [
-                    {"role": "user", "content": message},
-                    {"role": "assistant", "content": assistant_response}
-                ]
-                self.memory.add(conversation, user_id=user_id)
+                # Only add to memory if the message is meaningful
+                if self.should_store_as_memory(message):
+                    conversation = [
+                        {"role": "user", "content": message},
+                        {"role": "assistant", "content": assistant_response}
+                    ]
+                    result = self.memory.add(conversation, user_id=user_id)
+                    # Log any relationships that were extracted
+                    if hasattr(result, 'get') and 'relationships' in str(result):
+                        logger.info(f"Memory added with potential relationships from: {message[:50]}...")
+                else:
+                    logger.info(f"Skipped storing as memory (filtered): {message[:50]}...")
             
             return assistant_response
             
@@ -231,13 +308,83 @@ Important:
                     memories_found.append(memory_text)
                     seen.add(normalized)
         
-        # Display
-        if memories_found:
-            print(f"\nAll stored memories ({len(memories_found)} items):")
-            for i, memory in enumerate(memories_found, 1):
-                print(f"{i}. {memory}")
+        # Handle relationships from 'relations' in get_all() response
+        relations_found = []
+        if isinstance(all_memories, dict) and 'relations' in all_memories:
+            logger.info(f"Retrieved {len(all_memories['relations'])} relationships")
+            for rel in all_memories['relations']:
+                if isinstance(rel, dict):
+                    source = rel.get('source', 'unknown')
+                    relationship = rel.get('relationship', rel.get('relation', 'unknown'))
+                    destination = rel.get('destination', rel.get('target', 'unknown'))
+                    relations_found.append(f"{source} -> {relationship} -> {destination}")
+        
+        # Display results
+        total_items = len(memories_found) + len(relations_found)
+        if total_items > 0:
+            print(f"\nAll stored memories ({total_items} items):")
+            count = 1
+            if memories_found:
+                for memory in memories_found:
+                    print(f"{count}. {memory}")
+                    count += 1
+            if relations_found:
+                print(f"\nRelationships:")
+                for relation in relations_found:
+                    print(f"{count}. {relation}")
+                    count += 1
         else:
             print("\nNo memories found.")
+    
+    def show_all_relationships(self, user_id: str):
+        """Display all relationship/graph data"""
+        try:
+            # Get all relationships from the graph store
+            relationships = self.memory.graph.get_all(filters={'user_id': user_id})
+            
+            if relationships:
+                print(f"\nAll stored relationships ({len(relationships)} items):")
+                
+                # Group relationships by type for better display
+                by_relation = {}
+                for rel in relationships:
+                    relation_type = rel.get('relationship', 'unknown')
+                    if relation_type not in by_relation:
+                        by_relation[relation_type] = []
+                    by_relation[relation_type].append(rel)
+                
+                # Display grouped relationships
+                for relation_type, rels in by_relation.items():
+                    print(f"\n  {relation_type.upper()} relationships:")
+                    for rel in rels:
+                        source = rel.get('source', 'unknown')
+                        target = rel.get('target', rel.get('destination', 'unknown'))
+                        print(f"    • {source} → {target}")
+            else:
+                print("\nNo relationships found.")
+                
+        except Exception as e:
+            print(f"\nError retrieving relationships: {e}")
+            logger.error(f"Error in show_all_relationships: {e}")
+    
+    def search_relationships(self, query: str, user_id: str):
+        """Search for specific relationships"""
+        try:
+            results = self.memory.graph.search(query=query, filters={'user_id': user_id})
+            
+            if results:
+                print(f"\nRelationships matching '{query}' ({len(results)} items):")
+                for i, rel in enumerate(results, 1):
+                    source = rel.get('source', 'unknown')
+                    relation = rel.get('relationship', 'unknown')
+                    target = rel.get('target', rel.get('destination', 'unknown'))
+                    print(f"{i}. {source} --{relation}--> {target}")
+            else:
+                print(f"\nNo relationships found matching '{query}'.")
+                
+        except Exception as e:
+            print(f"\nError searching relationships: {e}")
+            logger.error(f"Error in search_relationships: {e}")
 
 def main():
     """Main chat loop"""
@@ -245,8 +392,12 @@ def main():
     user_id = "adam_001"  # Better user ID
     
     print("Mem0 Assistant Ready!")
-    print("Commands: 'memories' to see all, 'quit' to exit")
-    print("You can say 'forget X' to remove memories about X")
+    print("Commands:")
+    print("  'memories' - show all stored memories")
+    print("  'relationships' - show all relationship/graph data")
+    print("  'search relationships <query>' - search for specific relationships")
+    print("  'forget X' - remove memories about X")
+    print("  'quit' - exit")
     print()
     
     while True:
@@ -257,6 +408,18 @@ def main():
             
         if user_input.lower() == 'memories':
             assistant.show_all_memories(user_id)
+            continue
+            
+        if user_input.lower() == 'relationships':
+            assistant.show_all_relationships(user_id)
+            continue
+            
+        if user_input.lower().startswith('search relationships '):
+            query = user_input[len('search relationships '):].strip()
+            if query:
+                assistant.search_relationships(query, user_id)
+            else:
+                print("Please specify a search query. Example: 'search relationships Dave'")
             continue
         
         if not user_input:
