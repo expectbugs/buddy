@@ -31,6 +31,7 @@ class ContextLogger:
         
         self.session_id = str(uuid.uuid4())
         self.interaction_count = 0
+        self.session_start_time = datetime.now(timezone.utc).isoformat()
         
         # Create/verify index file - fail loudly if problems
         self.index_file = self.log_dir / "lookup_index.json"
@@ -56,9 +57,16 @@ class ContextLogger:
                        user_input: str,
                        assistant_response: str,
                        reasoning: Optional[str] = None,
-                       metadata: Optional[Dict[str, Any]] = None) -> str:
+                       metadata: Optional[Dict[str, Any]] = None,
+                       memory_operations: Optional[Dict[str, Any]] = None,
+                       thinking_trace: Optional[str] = None,
+                       user_id: Optional[str] = None,
+                       response_time_ms: Optional[float] = None,
+                       enhanced_format: bool = True,
+                       lookup_code: Optional[str] = None) -> str:
         """
         Log complete interaction with lookup code
+        Supports both basic format (backward compatible) and enhanced format (Phase 3)
         Returns: lookup code for this entry
         FAILS LOUDLY if logging fails
         """
@@ -66,24 +74,88 @@ class ContextLogger:
             raise ValueError("CONTEXT LOGGING REQUIRES NON-EMPTY user_input AND assistant_response")
         
         self.interaction_count += 1
-        lookup_code = self.generate_lookup_code()
+        if lookup_code is None:
+            lookup_code = self.generate_lookup_code()
+        else:
+            # LOUD VALIDATION: If provided lookup code, we MUST use it exactly
+            if not lookup_code.startswith("CTX-"):
+                raise ValueError(f"PROVIDED LOOKUP CODE IS INVALID: {lookup_code}")
+        current_time = datetime.now(timezone.utc)
+        current_timestamp = time.time()
         
-        entry = {
-            "lookup_code": lookup_code,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "unix_timestamp": time.time(),
-            "session_id": self.session_id,
-            "interaction_number": self.interaction_count,
-            "user_input": user_input,
-            "assistant_response": assistant_response,
-            "reasoning": reasoning,
-            "metadata": metadata or {},
-            "character_counts": {
-                "user_input": len(user_input),
-                "assistant_response": len(assistant_response),
-                "reasoning": len(reasoning) if reasoning else 0
+        if enhanced_format:
+            # Enhanced Phase 3 format
+            entry = {
+                "lookup_code": lookup_code,
+                "timestamp": current_time.isoformat(),
+                "unix_timestamp": current_timestamp,
+                "format_version": "3.0",
+                
+                "session_info": {
+                    "user_id": user_id or "unknown",
+                    "conversation_turn": self.interaction_count,
+                    "session_id": self.session_id,
+                    "session_start": getattr(self, 'session_start_time', current_time.isoformat())
+                },
+                
+                "interaction": {
+                    "user_input": user_input,
+                    "user_input_with_temporal": user_input,  # Will be enhanced by caller if temporal utils used
+                    "assistant_response": assistant_response,
+                    "thinking_trace": thinking_trace,
+                    "response_time_ms": response_time_ms or 0,
+                    "reasoning": reasoning  # Keep for backward compatibility
+                },
+                
+                "memory_operations": memory_operations or {
+                    "memories_searched": [],
+                    "memories_found": [],
+                    "memories_added": [],
+                    "relationships_extracted": []
+                },
+                
+                "context_metadata": {
+                    "topics": [],
+                    "entities": [],
+                    "importance_score": 0.5,
+                    "expansion_eligible": False,
+                    "expansion_reasons": [],
+                    "conversation_type": "general"
+                },
+                
+                "system_metadata": {
+                    "enhanced_memory_version": "3.0",
+                    "phase": 3,
+                    "model_used": "unknown",
+                    "legacy_metadata": metadata or {}
+                },
+                
+                "character_counts": {
+                    "user_input": len(user_input),
+                    "assistant_response": len(assistant_response),
+                    "thinking_trace": len(thinking_trace) if thinking_trace else 0,
+                    "reasoning": len(reasoning) if reasoning else 0
+                }
             }
-        }
+        else:
+            # Basic format for backward compatibility
+            entry = {
+                "lookup_code": lookup_code,
+                "timestamp": current_time.isoformat(),
+                "unix_timestamp": current_timestamp,
+                "session_id": self.session_id,
+                "interaction_number": self.interaction_count,
+                "user_input": user_input,
+                "assistant_response": assistant_response,
+                "reasoning": reasoning,
+                "metadata": metadata or {},
+                "format_version": "2.0",
+                "character_counts": {
+                    "user_input": len(user_input),
+                    "assistant_response": len(assistant_response),
+                    "reasoning": len(reasoning) if reasoning else 0
+                }
+            }
         
         # Write to daily log file - fail loudly if problems
         log_file = self.log_dir / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
@@ -101,6 +173,105 @@ class ContextLogger:
         
         logger.debug(f"Context logged: {lookup_code}")  # Changed to debug level
         return lookup_code
+    
+    def log_memory_operation(self, 
+                           operation_type: str, 
+                           details: Dict[str, Any],
+                           user_id: Optional[str] = None) -> str:
+        """
+        Log individual memory operations for Phase 3 agent training data
+        FAILS LOUDLY if logging fails
+        
+        Args:
+            operation_type: Type of operation (search, add, update, delete, relationship_extract)
+            details: Operation-specific details
+            user_id: User identifier
+            
+        Returns:
+            lookup code for this operation log
+        """
+        if not operation_type or not details:
+            raise ValueError("MEMORY OPERATION LOGGING REQUIRES operation_type AND details")
+        
+        lookup_code = self.generate_lookup_code()
+        current_time = datetime.now(timezone.utc)
+        
+        entry = {
+            "lookup_code": lookup_code,
+            "timestamp": current_time.isoformat(),
+            "unix_timestamp": time.time(),
+            "format_version": "3.0",
+            "entry_type": "memory_operation",
+            
+            "session_info": {
+                "user_id": user_id or "unknown",
+                "session_id": self.session_id,
+                "session_start": self.session_start_time
+            },
+            
+            "operation": {
+                "type": operation_type,
+                "details": details,
+                "timestamp": current_time.isoformat()
+            },
+            
+            "system_metadata": {
+                "enhanced_memory_version": "3.0",
+                "phase": 3,
+                "log_type": "memory_operation"
+            }
+        }
+        
+        # Write to daily log file - fail loudly if problems
+        log_file = self.log_dir / f"memory_ops_{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
+        try:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+        except Exception as e:
+            raise RuntimeError(f"FAILED TO WRITE MEMORY OPERATION LOG to {log_file}: {e}")
+        
+        # Update lookup index - fail loudly if problems
+        try:
+            self._update_lookup_index(lookup_code, log_file, entry['timestamp'])
+        except Exception as e:
+            raise RuntimeError(f"FAILED TO UPDATE LOOKUP INDEX for memory operation {lookup_code}: {e}")
+        
+        logger.debug(f"Memory operation logged: {operation_type} - {lookup_code}")
+        return lookup_code
+    
+    def update_memory_operations_in_log(self, 
+                                      lookup_code: str,
+                                      memory_operations: Dict[str, Any]) -> bool:
+        """
+        Update memory operations in an existing log entry
+        Used to add memory operation data after the fact
+        FAILS LOUDLY if update fails
+        
+        Args:
+            lookup_code: The lookup code of the entry to update
+            memory_operations: Memory operations data to add
+            
+        Returns:
+            True if successful
+        """
+        if not lookup_code or not memory_operations:
+            raise ValueError("UPDATE REQUIRES lookup_code AND memory_operations")
+        
+        # This is a simplified implementation - in a real system you might want
+        # to implement more sophisticated log updating mechanisms
+        logger.warning(f"Memory operations update requested for {lookup_code} - implementing as separate log entry")
+        
+        # For now, log as a separate memory operation entry
+        self.log_memory_operation(
+            operation_type="log_update",
+            details={
+                "original_lookup_code": lookup_code,
+                "memory_operations": memory_operations,
+                "update_reason": "post_interaction_memory_data"
+            }
+        )
+        
+        return True
     
     def _update_lookup_index(self, lookup_code: str, log_file: Path, timestamp: str):
         """Maintain fast lookup index - FAIL LOUDLY on errors"""
@@ -149,20 +320,59 @@ class ContextLogger:
         if not log_file.exists():
             raise FileNotFoundError(f"LOG FILE NOT FOUND: {log_file}")
         
-        # Search for entry in log file
+        # Search for entry in log file - handle both old and new formats
         try:
             with open(log_file, 'r', encoding='utf-8') as f:
                 for line in f:
                     try:
                         entry = json.loads(line)
                         if entry.get("lookup_code") == lookup_code:
-                            return entry
+                            # Normalize format for backward compatibility
+                            return self._normalize_log_entry(entry)
                     except json.JSONDecodeError:
                         continue
         except Exception as e:
             raise RuntimeError(f"FAILED TO READ LOG FILE {log_file}: {e}")
         
         raise KeyError(f"ENTRY NOT FOUND IN LOG FILE for {lookup_code}")
+    
+    def _normalize_log_entry(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalize log entries for backward compatibility
+        Converts between different format versions
+        """
+        format_version = entry.get("format_version", "1.0")
+        
+        if format_version == "3.0":
+            # Enhanced format - return as-is but ensure backward compatibility fields exist
+            normalized = entry.copy()
+            
+            # Extract backward compatibility fields from enhanced structure
+            if "interaction" in entry:
+                normalized["user_input"] = entry["interaction"].get("user_input", "")
+                normalized["assistant_response"] = entry["interaction"].get("assistant_response", "")
+                normalized["reasoning"] = entry["interaction"].get("reasoning")
+            
+            if "session_info" in entry:
+                normalized["session_id"] = entry["session_info"].get("session_id", "")
+                normalized["interaction_number"] = entry["session_info"].get("conversation_turn", 0)
+            
+            # Ensure metadata field exists for backward compatibility
+            if "metadata" not in normalized:
+                normalized["metadata"] = entry.get("system_metadata", {}).get("legacy_metadata", {})
+                
+            return normalized
+            
+        elif format_version == "2.0":
+            # Basic format - add format_version if missing and return
+            if "format_version" not in entry:
+                entry["format_version"] = "2.0"
+            return entry
+            
+        else:
+            # Very old format - add format_version and return
+            entry["format_version"] = "1.0"
+            return entry
     
     def search_logs(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
         """
@@ -199,15 +409,17 @@ class ContextLogger:
                             
                         try:
                             entry = json.loads(line)
+                            normalized_entry = self._normalize_log_entry(entry)
+                            
                             # Search in user input, assistant response, and metadata
                             searchable_text = (
-                                entry.get("user_input", "") + " " +
-                                entry.get("assistant_response", "") + " " +
-                                json.dumps(entry.get("metadata", {}))
+                                normalized_entry.get("user_input", "") + " " +
+                                normalized_entry.get("assistant_response", "") + " " +
+                                json.dumps(normalized_entry.get("metadata", {}))
                             ).lower()
                             
                             if query_lower in searchable_text:
-                                results.append(entry)
+                                results.append(normalized_entry)
                                 
                         except json.JSONDecodeError:
                             # Skip malformed lines but don't fail the whole search
@@ -240,8 +452,38 @@ class ContextLogger:
                     for line in f:
                         try:
                             entry = json.loads(line)
-                            if entry.get("session_id") == target_session:
-                                logs.append(entry)
+                            normalized_entry = self._normalize_log_entry(entry)
+                            if normalized_entry.get("session_id") == target_session:
+                                logs.append(normalized_entry)
+                        except json.JSONDecodeError:
+                            # Skip malformed lines
+                            continue
+            except Exception as e:
+                raise RuntimeError(f"FAILED TO READ LOG FILE {log_file}: {e}")
+                
+        return sorted(logs, key=lambda x: x.get("unix_timestamp", 0))
+    
+    def get_all_logs(self) -> List[Dict[str, Any]]:
+        """
+        Get ALL logs across all sessions - for timeline view
+        FAILS LOUDLY on errors per Rule 3
+        """
+        logs = []
+        
+        try:
+            log_files = sorted(self.log_dir.glob("*.jsonl"))
+        except Exception as e:
+            raise RuntimeError(f"FAILED TO LIST LOG FILES: {e}")
+        
+        for log_file in log_files:
+            try:
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        try:
+                            entry = json.loads(line)
+                            normalized_entry = self._normalize_log_entry(entry)
+                            # Include all entries, not filtered by session
+                            logs.append(normalized_entry)
                         except json.JSONDecodeError:
                             # Skip malformed lines
                             continue
@@ -252,28 +494,41 @@ class ContextLogger:
     
     def get_stats(self) -> Dict[str, Any]:
         """
-        Get logging statistics
+        Get logging statistics - enhanced for Phase 3
         FAILS LOUDLY if can't read logs
         """
         total_entries = 0
         total_characters = 0
         sessions = set()
+        format_versions = {}
+        memory_operations_count = 0
+        enhanced_entries = 0
         
         try:
             log_files = list(self.log_dir.glob("*.jsonl"))
+            memory_log_files = list(self.log_dir.glob("memory_ops_*.jsonl"))
         except Exception as e:
             raise RuntimeError(f"FAILED TO LIST LOG FILES for stats: {e}")
         
+        # Process regular log files
         for log_file in log_files:
             try:
                 with open(log_file, 'r', encoding='utf-8') as f:
                     for line in f:
                         try:
                             entry = json.loads(line)
+                            normalized_entry = self._normalize_log_entry(entry)
                             total_entries += 1
-                            sessions.add(entry.get("session_id"))
+                            sessions.add(normalized_entry.get("session_id"))
                             
-                            counts = entry.get("character_counts", {})
+                            # Track format versions
+                            version = normalized_entry.get("format_version", "1.0")
+                            format_versions[version] = format_versions.get(version, 0) + 1
+                            
+                            if version == "3.0":
+                                enhanced_entries += 1
+                            
+                            counts = normalized_entry.get("character_counts", {})
                             total_characters += sum(counts.values())
                             
                         except json.JSONDecodeError:
@@ -282,11 +537,36 @@ class ContextLogger:
             except Exception as e:
                 raise RuntimeError(f"FAILED TO READ LOG FILE {log_file} for stats: {e}")
         
+        # Process memory operation log files
+        for log_file in memory_log_files:
+            try:
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        try:
+                            entry = json.loads(line)
+                            memory_operations_count += 1
+                        except json.JSONDecodeError:
+                            continue
+            except Exception as e:
+                logger.warning(f"Could not read memory ops log {log_file}: {e}")
+        
         return {
             "total_entries": total_entries,
             "total_sessions": len(sessions),
             "total_characters": total_characters,
             "current_session_id": self.session_id,
             "log_files": len(log_files),
-            "log_directory": str(self.log_dir)
+            "memory_operation_files": len(memory_log_files),
+            "memory_operations_count": memory_operations_count,
+            "log_directory": str(self.log_dir),
+            "format_versions": format_versions,
+            "enhanced_entries": enhanced_entries,
+            "enhanced_format_percentage": (enhanced_entries / total_entries * 100) if total_entries > 0 else 0,
+            "phase": 3,
+            "features": [
+                "enhanced_logging",
+                "memory_operation_tracking", 
+                "backward_compatibility",
+                "format_normalization"
+            ]
         }

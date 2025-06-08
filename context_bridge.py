@@ -32,9 +32,11 @@ class ContextBridge:
         if not memory_metadata:
             raise ValueError(f"MEMORY METADATA MISSING for memory {memory_id}")
         
-        lookup_code = memory_metadata.get('lookup_code')
+        # Check both possible lookup code key names for compatibility
+        lookup_code = memory_metadata.get('context_lookup_code') or memory_metadata.get('lookup_code')
         if not lookup_code:
-            raise KeyError(f"NO LOOKUP CODE in metadata for memory {memory_id}")
+            available_keys = list(memory_metadata.keys())
+            raise KeyError(f"NO LOOKUP CODE in metadata for memory {memory_id}. Available keys: {available_keys}")
         
         try:
             context = self.context_logger.retrieve_by_lookup_code(lookup_code)
