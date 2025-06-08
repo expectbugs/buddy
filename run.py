@@ -27,6 +27,18 @@ from temporal_utils import inject_temporal_awareness, get_current_datetime_info
 # Phase 2 Enhanced Memory System
 from enhanced_memory import EnhancedMemory
 
+# Rule 3 Compliance - Exception hierarchy
+from exceptions import ResponseGenerationError, ContextLoggingError, ConfigurationError
+
+# Debug infrastructure
+from debug_info import debug_tracker
+
+# Phase 2: Centralized configuration
+from config_manager import config_manager
+
+# Phase 3: Multi-agent foundation
+from multi_agent_foundation import MultiAgentMemoryFoundation
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -41,57 +53,95 @@ if os.getenv("DEBUG", "").lower() != "true":
 load_dotenv()
 
 class ImprovedMem0Assistant:
-    """Improved mem0 assistant that properly handles memory operations"""
+    """Improved mem0 assistant with centralized configuration management"""
     
-    def __init__(self):
+    def __init__(self, config_overrides: Optional[Dict[str, Any]] = None):
+        """Initialize assistant with centralized configuration"""
+        debug_tracker.log_operation("assistant", "initialization_start", {
+            "has_config_overrides": config_overrides is not None
+        })
+        
+        # Load centralized configuration
+        config_result = config_manager.load_config()
+        if not config_result.success:
+            raise ConfigurationError(f"Failed to load configuration: {config_result.error}")
+        
+        # Apply any overrides
+        if config_overrides:
+            override_result = config_manager.override_config(config_overrides)
+            if not override_result.success:
+                raise ConfigurationError(f"Failed to apply config overrides: {override_result.error}")
+        
+        self.system_config = config_manager.config
+        
+        debug_tracker.log_operation("assistant", "config_loaded", {
+            "loaded_from_file": config_result.metadata.get("loaded_from_file", False),
+            "config_file": config_result.metadata.get("config_file", "defaults"),
+            "overrides_applied": config_overrides is not None
+        })
+        
         # Check for OpenAI API key
         if not os.getenv("OPENAI_API_KEY"):
-            logger.error("Please set OPENAI_API_KEY environment variable")
-            sys.exit(1)
+            raise ConfigurationError("Please set OPENAI_API_KEY environment variable")
         
-        # Initialize mem0 with proper configuration
-        self.config = {
-            "version": "v1.1",  # Required for graph support
-            "graph_store": {
-                "provider": "neo4j",
-                "config": {
-                    "url": "bolt://localhost:7687",
-                    "username": "neo4j",
-                    "password": "password123"
-                }
-            },
-            "vector_store": {
-                "provider": "qdrant",
-                "config": {
-                    "host": "localhost",
-                    "port": 6333,
-                    "collection_name": "mem0_fixed"
-                }
-            }
-        }
+        # Get mem0-compatible configuration
+        self.mem0_config = config_manager.get_mem0_config()
         
         try:
-            # Initialize base mem0 instance
-            base_memory = Memory.from_config(config_dict=self.config)
+            # Initialize base mem0 instance with centralized config
+            base_memory = Memory.from_config(config_dict=self.mem0_config)
             
-            # Initialize Phase 3 context expansion system
+            # Initialize Phase 3 context expansion system with centralized config
             from context_logger import ContextLogger
             from context_bridge import ContextBridge
             from context_expander import ContextExpander
             
-            self.context_logger = ContextLogger()
+            self.context_logger = ContextLogger(log_dir=self.system_config.logging.log_directory)
             self.context_bridge = ContextBridge(self.context_logger)
-            self.context_expander = ContextExpander(self.context_bridge)
+            self.context_expander = ContextExpander(
+                self.context_bridge,
+                relevance_threshold=self.system_config.memory.relevance_threshold,
+                max_expansions=self.system_config.memory.max_expansions,
+                cache_size=self.system_config.memory.cache_size,
+                cache_ttl_minutes=self.system_config.memory.cache_ttl_minutes,
+                max_context_tokens=self.system_config.memory.max_context_tokens,
+                expansion_timeout_ms=self.system_config.memory.expansion_timeout_ms
+            )
             
             # Wrap with EnhancedMemory for Phase 3 functionality
             self.memory = EnhancedMemory(base_memory, self.context_logger, self.context_expander)
             
+            # Phase 3: Create multi-agent foundation
+            self.foundation = MultiAgentMemoryFoundation(self.memory)
+            
             self.openai_client = OpenAI()
-            logger.info("Successfully initialized mem0 with graph memory support")
-            logger.info("Successfully initialized Phase 3 enhanced memory system with context expansion")
+            
+            debug_tracker.log_operation("assistant", "initialization_complete", {
+                "memory_config": {
+                    "relevance_threshold": self.system_config.memory.relevance_threshold,
+                    "max_expansions": self.system_config.memory.max_expansions,
+                    "cache_size": self.system_config.memory.cache_size
+                },
+                "database_config": {
+                    "neo4j_url": self.system_config.database.neo4j_url,
+                    "qdrant_host": self.system_config.database.qdrant_host,
+                    "qdrant_port": self.system_config.database.qdrant_port
+                },
+                "multi_agent_foundation": {
+                    "foundation_ready": True,
+                    "foundation_type": type(self.foundation).__name__
+                }
+            }, success=True)
+            
+            logger.info("Successfully initialized ImprovedMem0Assistant with centralized configuration")
+            logger.info(f"Using configuration: mem0={self.mem0_config['version']}, relevance_threshold={self.system_config.memory.relevance_threshold}")
+            
         except Exception as e:
-            logger.error(f"Failed to initialize enhanced memory system: {e}")
-            raise
+            debug_tracker.log_operation("assistant", "initialization_failed", {
+                "error": str(e)
+            }, success=False, error=str(e))
+            
+            raise ConfigurationError(f"Failed to initialize assistant: {e}") from e
         
         # Track entities to forget
         self.forget_list = set()
@@ -344,8 +394,7 @@ class ImprovedMem0Assistant:
             return assistant_response
             
         except Exception as e:
-            logger.error(f"Error generating response: {e}")
-            return "Sorry, I encountered an error generating a response."
+            raise ResponseGenerationError(f"Failed to generate response for user input '{message[:50]}...': {e}") from e
     
     def _is_valid_relationship(self, source: str, relation: str, target: str) -> bool:
         """
@@ -763,7 +812,7 @@ def main():
     assistant = ImprovedMem0Assistant()
     user_id = "adam_001"  # Better user ID
     
-    print("Mem0 Assistant Ready with Phase 3 Context Expansion!")
+    print("Buddy Memory System Ready - Phase 3: Multi-Agent Foundation!")
     print("Commands:")
     print("  'memories' - show all stored memories")
     print("  'relationships' - show all relationship/graph data")
@@ -773,6 +822,36 @@ def main():
     print("  '/expand' - manually expand last search results")
     print("  '/timeline [date]' - show conversation timeline with context links")
     print("  '/expansion on/off' - toggle automatic context expansion")
+    print("")
+    print("Debug Commands:")
+    print("  '/debug' - show comprehensive debug information")
+    print("  '/debug operations' - show recent operations")
+    print("  '/debug errors' - show recent failed operations")
+    print("  '/debug stats' - show debug statistics")
+    print("  '/debug clear' - clear debug history")
+    print("")
+    print("System Commands:")
+    print("  '/health' - comprehensive system health check")
+    print("  '/health neo4j' - check Neo4j status")
+    print("  '/health qdrant' - check Qdrant status")
+    print("  '/health filesystem' - check file system access")
+    print("  '/health debug' - check debug system status")
+    print("")
+    print("Configuration Commands:")
+    print("  '/config' - show current configuration")
+    print("  '/config save' - save current configuration to file")
+    print("  '/config reload' - reload configuration from file")
+    print("  '/config set <key> <value>' - set configuration value")
+    print("  '/config get <key>' - get specific configuration value")
+    print("")
+    print("Multi-Agent Commands:")
+    print("  '/agents' - list all agent namespaces")
+    print("  '/agent create <id> <type>' - create new agent namespace")
+    print("  '/agent <id> search <query>' - search using specific agent")
+    print("  '/plugins' - list all registered plugins")
+    print("  '/foundation health' - comprehensive foundation health")
+    print("  '/foundation debug' - comprehensive debug information")
+    print("  '/foundation stats' - foundation statistics")
     print("  'quit' - exit")
     print()
     
@@ -833,12 +912,536 @@ def main():
                 print("Please specify 'on' or 'off'. Example: '/expansion on'")
             continue
         
+        # Debug commands
+        if user_input.startswith('/debug'):
+            parts = user_input.split(' ', 1)
+            if len(parts) == 1 or parts[1].strip() == '':
+                # Show comprehensive debug information
+                try:
+                    summary = debug_tracker.get_debug_summary()
+                    print(f"\n=== DEBUG SUMMARY ===")
+                    print(f"Total Operations: {summary['total_operations']}")
+                    print(f"Error Count: {summary['error_count']}")
+                    print(f"Components Active: {len(summary['component_activity'])}")
+                    print(f"Timestamp: {summary['timestamp']}")
+                    print(f"\nComponent Activity:")
+                    for comp, count in summary['component_activity'].items():
+                        print(f"  {comp}: {count} operations")
+                    print(f"\nComponent States:")
+                    for comp, state_info in summary['component_states'].items():
+                        print(f"  {comp}: {state_info['timestamp']}")
+                except Exception as e:
+                    print(f"Debug summary failed: {e}")
+            elif parts[1].strip() == 'operations':
+                # Show recent operations
+                try:
+                    ops = debug_tracker.get_recent_operations(20)
+                    print(f"\n=== RECENT OPERATIONS ({len(ops)}) ===")
+                    for i, op in enumerate(ops[-10:], 1):  # Show last 10
+                        status = "✓" if op['success'] else "✗"
+                        print(f"{i}. {status} {op['component']}.{op['operation']} at {op['timestamp']}")
+                        if not op['success'] and op['error']:
+                            print(f"   Error: {op['error']}")
+                except Exception as e:
+                    print(f"Operations listing failed: {e}")
+            elif parts[1].strip() == 'errors':
+                # Show recent failed operations
+                try:
+                    errors = debug_tracker.get_error_operations(10)
+                    print(f"\n=== RECENT ERRORS ({len(errors)}) ===")
+                    for i, error_op in enumerate(errors, 1):
+                        print(f"{i}. ✗ {error_op['component']}.{error_op['operation']} at {error_op['timestamp']}")
+                        print(f"   Error: {error_op['error']}")
+                        print(f"   Details: {error_op['details']}")
+                        print()
+                except Exception as e:
+                    print(f"Error listing failed: {e}")
+            elif parts[1].strip() == 'stats':
+                # Show debug statistics
+                try:
+                    stats = debug_tracker.get_statistics()
+                    print(f"\n=== DEBUG STATISTICS ===")
+                    print(f"Total Operations: {stats['total_operations']}")
+                    print(f"Error Operations: {stats['error_operations']}")
+                    print(f"Success Rate: {stats['success_rate']:.1f}%")
+                    print(f"Components Tracked: {stats['components_tracked']}")
+                    print(f"Memory Usage: {stats['memory_usage_percent']:.1f}%")
+                    print(f"\nBy Component:")
+                    for comp, comp_stats in stats['operations_by_component'].items():
+                        print(f"  {comp}: {comp_stats['total']} ops, {comp_stats['success_rate']:.1f}% success")
+                except Exception as e:
+                    print(f"Statistics generation failed: {e}")
+            elif parts[1].strip() == 'clear':
+                # Clear debug history
+                try:
+                    debug_tracker.clear_history()
+                    print("\nDebug history cleared.")
+                except Exception as e:
+                    print(f"Debug clear failed: {e}")
+            else:
+                print("Unknown debug command. Use: /debug, /debug operations, /debug errors, /debug stats, /debug clear")
+            continue
+        
+        # Health check commands
+        if user_input.startswith('/health'):
+            try:
+                from health_check import health_checker
+                
+                health_parts = user_input.split(' ', 1)
+                health_type = health_parts[1].strip() if len(health_parts) > 1 else 'all'
+                
+                if health_type == 'all' or health_type == '':
+                    # Comprehensive health check
+                    health_results = health_checker.comprehensive_health_check()
+                    print(f"\n=== SYSTEM HEALTH CHECK ===")
+                    print(f"Overall Status: {health_results['overall_status'].upper()}")
+                    print(f"Check Duration: {health_results['check_duration_ms']:.1f}ms")
+                    print(f"Components: {health_results['healthy_count']}/{health_results['total_components']} healthy")
+                    print()
+                    
+                    for component, status in health_results['components'].items():
+                        status_icon = "✓" if status['status'] == 'healthy' else "✗"
+                        print(f"{status_icon} {component}: {status['status']}")
+                        
+                        if status.get('response_time_ms'):
+                            print(f"   Response time: {status['response_time_ms']:.1f}ms")
+                        
+                        if status.get('collections_count') is not None:
+                            print(f"   Collections: {status['collections_count']}")
+                        
+                        if status.get('total_operations') is not None:
+                            print(f"   Operations tracked: {status['total_operations']}")
+                        
+                        if status.get('error'):
+                            print(f"   Error: {status['error']}")
+                        
+                        print()
+                    
+                    if health_results['unhealthy_components']:
+                        print(f"Unhealthy components: {', '.join(health_results['unhealthy_components'])}")
+                        
+                elif health_type == 'neo4j':
+                    status = health_checker.check_neo4j()
+                    print(f"\n=== NEO4J HEALTH ===")
+                    print(f"Status: {status['status']}")
+                    print(f"URL: {status['url']}")
+                    if status['error']:
+                        print(f"Error: {status['error']}")
+                    else:
+                        print(f"Response time: {status['response_time_ms']:.1f}ms")
+                        print(f"Query time: {status['query_time_ms']:.1f}ms")
+                        print(f"Query successful: {status['query_successful']}")
+                        
+                elif health_type == 'qdrant':
+                    status = health_checker.check_qdrant()
+                    print(f"\n=== QDRANT HEALTH ===")
+                    print(f"Status: {status['status']}")
+                    print(f"URL: {status['url']}")
+                    if status['error']:
+                        print(f"Error: {status['error']}")
+                    else:
+                        print(f"Response time: {status['response_time_ms']:.1f}ms")
+                        print(f"Collections: {status['collections_count']}")
+                        
+                elif health_type == 'filesystem':
+                    status = health_checker.check_file_system()
+                    print(f"\n=== FILE SYSTEM HEALTH ===")
+                    print(f"Status: {status['status']}")
+                    print(f"Directory: {status['directory_path']}")
+                    print(f"Exists: {status['directory_exists']}")
+                    print(f"Readable: {status['readable']}")
+                    print(f"Writable: {status['writable']}")
+                    if status['error']:
+                        print(f"Error: {status['error']}")
+                        
+                elif health_type == 'debug':
+                    status = health_checker.check_debug_system()
+                    print(f"\n=== DEBUG SYSTEM HEALTH ===")
+                    print(f"Status: {status['status']}")
+                    if status['error']:
+                        print(f"Error: {status['error']}")
+                    else:
+                        print(f"Check time: {status['check_time_ms']:.1f}ms")
+                        print(f"Total operations: {status['total_operations']}")
+                        print(f"Components tracked: {status['components_tracked']}")
+                        print(f"Recent operations: {status['recent_operations_count']}")
+                        
+                else:
+                    print("Unknown health check. Use: /health, /health neo4j, /health qdrant, /health filesystem, /health debug")
+                    
+            except Exception as e:
+                print(f"Health check failed: {e}")
+            continue
+        
+        # Configuration commands
+        if user_input.startswith('/config'):
+            try:
+                config_parts = user_input.split(' ', 2)  # Allow for 'set key value'
+                config_command = config_parts[1] if len(config_parts) > 1 else 'show'
+                
+                if config_command == 'show' or config_command == '':
+                    # Show current configuration
+                    config_result = config_manager.get_config()
+                    if config_result.success:
+                        config_dict = config_result.data
+                        
+                        print(f"\n=== CURRENT CONFIGURATION ===")
+                        print(f"Config loaded from: {config_result.metadata.get('config_file', 'defaults')}")
+                        print()
+                        
+                        print(f"Database Configuration:")
+                        for key, value in config_dict["database"].items():
+                            if "password" in key.lower():
+                                print(f"  {key}: {'*' * len(str(value))}")
+                            else:
+                                print(f"  {key}: {value}")
+                        
+                        print(f"\nMemory Configuration:")
+                        for key, value in config_dict["memory"].items():
+                            print(f"  {key}: {value}")
+                        
+                        print(f"\nLogging Configuration:")
+                        for key, value in config_dict["logging"].items():
+                            print(f"  {key}: {value}")
+                        
+                        print()
+                    else:
+                        print(f"\n✗ Failed to get configuration: {config_result.error}")
+                
+                elif config_command == 'save':
+                    # Save current configuration to file
+                    config_data = config_manager.config.to_dict()
+                    save_result = config_manager.save_config(config_data)
+                    
+                    if save_result.success:
+                        print(f"\n✓ Configuration saved to {save_result.metadata['config_file']}")
+                    else:
+                        print(f"\n✗ Failed to save configuration: {save_result.error}")
+                
+                elif config_command == 'reload':
+                    # Reload configuration from file
+                    reload_result = config_manager.load_config()
+                    
+                    if reload_result.success:
+                        config_file = reload_result.metadata.get('config_file', 'defaults')
+                        loaded_from_file = reload_result.metadata.get('loaded_from_file', False)
+                        
+                        print(f"\n✓ Configuration reloaded from {config_file}")
+                        if loaded_from_file:
+                            print("  Configuration loaded from file")
+                        else:
+                            print("  Using default configuration (no file found)")
+                        
+                        print("\n⚠️  Note: Restart required for some configuration changes to take effect")
+                    else:
+                        print(f"\n✗ Failed to reload configuration: {reload_result.error}")
+                
+                elif config_command == 'set' and len(config_parts) >= 4:
+                    # Set configuration value
+                    key = config_parts[2]
+                    value_str = ' '.join(config_parts[3:])  # Join remaining parts for multi-word values
+                    
+                    # Try to parse value as appropriate type
+                    try:
+                        if value_str.lower() in ['true', 'false']:
+                            value = value_str.lower() == 'true'
+                        elif value_str.isdigit():
+                            value = int(value_str)
+                        elif '.' in value_str and value_str.replace('.', '').isdigit():
+                            value = float(value_str)
+                        else:
+                            value = value_str
+                    except ValueError:
+                        value = value_str
+                    
+                    set_result = config_manager.set_config(key, value)
+                    
+                    if set_result.success:
+                        print(f"\n✓ Configuration updated: {key} = {value}")
+                        print("  Use '/config save' to persist changes")
+                        print("  Restart may be required for some changes to take effect")
+                    else:
+                        print(f"\n✗ Failed to set configuration: {set_result.error}")
+                
+                elif config_command == 'get' and len(config_parts) >= 3:
+                    # Get specific configuration value
+                    key = config_parts[2]
+                    get_result = config_manager.get_config(key)
+                    
+                    if get_result.success:
+                        print(f"\n=== CONFIGURATION VALUE ===")
+                        for k, v in get_result.data.items():
+                            if "password" in k.lower():
+                                print(f"{k}: {'*' * len(str(v))}")
+                            else:
+                                print(f"{k}: {v}")
+                    else:
+                        print(f"\n✗ Failed to get configuration value: {get_result.error}")
+                
+                elif config_command == 'set':
+                    print("\nUsage: /config set <key> <value>")
+                    print("Examples:")
+                    print("  /config set memory.relevance_threshold 0.65")
+                    print("  /config set database.qdrant_port 6334")
+                    print("  /config set logging.debug_level DEBUG")
+                
+                elif config_command == 'get':
+                    print("\nUsage: /config get <key>")
+                    print("Examples:")
+                    print("  /config get memory.relevance_threshold")
+                    print("  /config get database")
+                    print("  /config get logging.log_directory")
+                
+                else:
+                    print("\nUnknown config command. Available commands:")
+                    print("  /config [show] - show current configuration")
+                    print("  /config save - save configuration to file")
+                    print("  /config reload - reload configuration from file")
+                    print("  /config set <key> <value> - set configuration value")
+                    print("  /config get <key> - get configuration value")
+                
+            except Exception as e:
+                print(f"\nConfiguration command failed: {e}")
+            continue
+        
+        # Multi-agent commands
+        if user_input.startswith('/agents'):
+            try:
+                agents_result = assistant.foundation.list_agents()
+                if agents_result.success:
+                    agents = agents_result.data
+                    if agents:
+                        print(f"\n=== Active Agent Namespaces ({len(agents)}) ===")
+                        for agent_id, info in agents.items():
+                            print(f"• {agent_id} ({info['agent_type']})")
+                            print(f"  Created: {info.get('creation_time', 'unknown')}")
+                            print(f"  Operations: {info.get('operation_count', 0)}")
+                            print(f"  Uptime: {info.get('uptime_seconds', 0):.1f}s")
+                            if info['custom_processors']:
+                                print(f"  Processors: {', '.join(info['custom_processors'])}")
+                            if info['custom_expanders']:
+                                print(f"  Expanders: {', '.join(info['custom_expanders'])}")
+                            if info['custom_filters']:
+                                print(f"  Filters: {', '.join(info['custom_filters'])}")
+                    else:
+                        print("\nNo agent namespaces created yet.")
+                        print("Use '/agent create <id> <type>' to create your first agent.")
+                else:
+                    print(f"✗ Error listing agents: {agents_result.error}")
+            except Exception as e:
+                print(f"\n✗ Agent listing failed: {e}")
+            continue
+
+        if user_input.startswith('/agent create '):
+            try:
+                parts = user_input.split(' ', 3)
+                if len(parts) >= 4:
+                    agent_id = parts[2]
+                    agent_type = parts[3]
+                    
+                    result = assistant.foundation.create_agent(agent_id, agent_type)
+                    if result.success:
+                        print(f"\n✓ Created agent namespace: {agent_id} ({agent_type})")
+                        print(f"  Agent can now be used with '/agent {agent_id} search <query>'")
+                    else:
+                        print(f"\n✗ Failed to create agent: {result.error}")
+                else:
+                    print("\nUsage: /agent create <id> <type>")
+                    print("Example: /agent create scheduler calendar_agent")
+            except Exception as e:
+                print(f"\n✗ Agent creation failed: {e}")
+            continue
+
+        if user_input.startswith('/agent ') and ' search ' in user_input:
+            try:
+                parts = user_input.split(' ', 3)
+                if len(parts) >= 4:
+                    agent_id = parts[1]
+                    query = parts[3]
+                    
+                    agent = assistant.foundation.get_agent(agent_id)
+                    if agent:
+                        result = agent.search_memories(query)
+                        if result.success:
+                            search_data = result.data
+                            print(f"\n=== Agent {agent_id} Search Results ===")
+                            print(f"Query: {query}")
+                            print(f"Results: {search_data.total_count}")
+                            print(f"Search time: {search_data.search_time_ms:.1f}ms")
+                            print(f"Expansion applied: {search_data.expansion_applied}")
+                            
+                            if result.metadata.get('agent_processing'):
+                                proc_info = result.metadata['agent_processing']
+                                print(f"Agent processing: {len(proc_info.get('filters_applied', []))} filters, {len(proc_info.get('processors_applied', []))} processors")
+                            
+                            for i, memory in enumerate(search_data.results[:5], 1):
+                                memory_text = memory.get('memory', memory.get('text', 'N/A'))
+                                score = memory.get('score', memory.get('relevance', 0))
+                                print(f"{i}. [{score:.3f}] {memory_text[:100]}...")
+                        else:
+                            print(f"\n✗ Agent search failed: {result.error}")
+                    else:
+                        print(f"\n✗ Agent '{agent_id}' not found")
+                        print("Use '/agents' to list available agents")
+                else:
+                    print("\nUsage: /agent <id> search <query>")
+                    print("Example: /agent scheduler search meetings today")
+            except Exception as e:
+                print(f"\n✗ Agent search failed: {e}")
+            continue
+
+        if user_input.startswith('/plugins'):
+            try:
+                plugins_result = assistant.foundation.list_plugins()
+                if plugins_result.success:
+                    plugins = plugins_result.data
+                    total_plugins = sum(len(plugin_list) for plugin_list in plugins.values())
+                    
+                    print(f"\n=== Registered Plugins ({total_plugins}) ===")
+                    
+                    for plugin_type, plugin_list in plugins.items():
+                        if plugin_list:
+                            type_display = plugin_type.replace('_', ' ').title()
+                            print(f"\n{type_display}:")
+                            for plugin in plugin_list:
+                                print(f"  • {plugin['name']} ({plugin['class']}) - Priority: {plugin['priority']}")
+                                if plugin['metadata']:
+                                    print(f"    Metadata: {plugin['metadata']}")
+                    
+                    if total_plugins == 0:
+                        print("No plugins registered yet.")
+                        print("Use foundation.register_processor/expander/filter() to add plugins.")
+                else:
+                    print(f"\n✗ Error listing plugins: {plugins_result.error}")
+            except Exception as e:
+                print(f"\n✗ Plugin listing failed: {e}")
+            continue
+
+        if user_input.startswith('/foundation health'):
+            try:
+                health_result = assistant.foundation.get_foundation_health()
+                if health_result.success:
+                    health_data = health_result.data
+                    overall_healthy = health_result.metadata.get('overall_healthy', False)
+                    
+                    print(f"\n=== FOUNDATION HEALTH ===")
+                    print(f"Overall Status: {'✓ HEALTHY' if overall_healthy else '✗ UNHEALTHY'}")
+                    print(f"Uptime: {health_data['uptime_seconds']:.1f}s")
+                    print(f"Active Agents: {health_data['active_agents']}")
+                    print(f"Registered Plugins: {health_data['registered_plugins']}")
+                    print(f"Shared Operations: {health_data['shared_operations']}")
+                    
+                    print(f"\nComponent Health:")
+                    if 'system_health' in health_data:
+                        sys_health = health_data['system_health']
+                        print(f"  System: {sys_health.get('overall_status', 'unknown').upper()}")
+                    
+                    if 'memory_health' in health_data:
+                        mem_health = health_data['memory_health']
+                        if 'error' not in mem_health:
+                            print(f"  Memory: {mem_health.get('status', 'unknown').upper()}")
+                        else:
+                            print(f"  Memory: ERROR - {mem_health['error']}")
+                    
+                    if 'agent_health' in health_data:
+                        agent_health = health_data['agent_health']
+                        if 'error' not in agent_health:
+                            print(f"  Agents: {agent_health.get('healthy_agents', 0)}/{agent_health.get('total_agents', 0)} healthy")
+                        else:
+                            print(f"  Agents: ERROR - {agent_health['error']}")
+                else:
+                    print(f"\n✗ Foundation health check failed: {health_result.error}")
+            except Exception as e:
+                print(f"\n✗ Foundation health check failed: {e}")
+            continue
+
+        if user_input.startswith('/foundation debug'):
+            try:
+                debug_result = assistant.foundation.get_foundation_debug_info()
+                if debug_result.success:
+                    debug_data = debug_result.data
+                    
+                    print(f"\n=== FOUNDATION DEBUG INFO ===")
+                    foundation_info = debug_data.get('foundation_info', {})
+                    print(f"Uptime: {foundation_info.get('uptime_seconds', 0):.1f}s")
+                    print(f"Shared Operations: {foundation_info.get('shared_operations', 0)}")
+                    
+                    active_agents = debug_data.get('active_agents', {})
+                    print(f"Active Agents: {len(active_agents)}")
+                    
+                    registered_plugins = debug_data.get('registered_plugins', {})
+                    total_plugins = sum(len(plugin_list) for plugin_list in registered_plugins.values())
+                    print(f"Registered Plugins: {total_plugins}")
+                    
+                    debug_summary = debug_data.get('debug_summary', {})
+                    print(f"Debug Operations: {debug_summary.get('total_operations', 0)}")
+                    print(f"Debug Errors: {debug_summary.get('error_count', 0)}")
+                    
+                    recent_ops = debug_data.get('recent_operations', [])
+                    print(f"Recent Foundation Operations: {len(recent_ops)}")
+                    for i, op in enumerate(recent_ops[-5:], 1):
+                        status = "✓" if op.get('success', True) else "✗"
+                        print(f"  {i}. {status} {op.get('component', 'unknown')}.{op.get('operation', 'unknown')}")
+                else:
+                    print(f"\n✗ Foundation debug failed: {debug_result.error}")
+            except Exception as e:
+                print(f"\n✗ Foundation debug failed: {e}")
+            continue
+
+        if user_input.startswith('/foundation stats'):
+            try:
+                stats_result = assistant.foundation.get_foundation_stats()
+                if stats_result.success:
+                    stats = stats_result.data
+                    
+                    print(f"\n=== FOUNDATION STATISTICS ===")
+                    foundation_stats = stats.get('foundation', {})
+                    print(f"Uptime: {foundation_stats.get('uptime_seconds', 0):.1f}s")
+                    print(f"Shared Operations: {foundation_stats.get('shared_operations', 0)}")
+                    
+                    agent_stats = stats.get('agents', {})
+                    print(f"Total Agents: {agent_stats.get('total_agents', 0)}")
+                    print(f"Agent Creations: {agent_stats.get('creation_count', 0)}")
+                    print(f"Total Agent Operations: {agent_stats.get('total_operations', 0)}")
+                    
+                    plugin_stats = stats.get('plugins', {})
+                    print(f"Total Plugins: {plugin_stats.get('total_plugins', 0)}")
+                    print(f"Processors: {plugin_stats.get('memory_processors', 0)}")
+                    print(f"Expanders: {plugin_stats.get('context_expanders', 0)}")
+                    print(f"Filters: {plugin_stats.get('memory_filters', 0)}")
+                    
+                    config_stats = stats.get('configuration', {})
+                    print(f"Config Loaded: {config_stats.get('config_loaded', False)}")
+                    print(f"Config Sections: {config_stats.get('config_sections', 0)}")
+                else:
+                    print(f"\n✗ Foundation stats failed: {stats_result.error}")
+            except Exception as e:
+                print(f"\n✗ Foundation stats failed: {e}")
+            continue
+        
         if not user_input:
             continue
         
         # Process the message
-        response = assistant.process_message(user_input, user_id)
-        print(f"\nAssistant: {response}\n")
+        debug_tracker.log_operation("main_interface", "user_message_start", {
+            "user_id": user_id,
+            "message_length": len(user_input)
+        })
+        
+        try:
+            response = assistant.process_message(user_input, user_id)
+            print(f"\nAssistant: {response}\n")
+            
+            debug_tracker.log_operation("main_interface", "user_message_complete", {
+                "user_id": user_id,
+                "response_length": len(response)
+            }, success=True)
+        except Exception as e:
+            debug_tracker.log_operation("main_interface", "user_message_failed", {
+                "user_id": user_id,
+                "error_type": type(e).__name__
+            }, success=False, error=str(e))
+            raise  # Re-raise the exception for Rule 3 compliance
 
 if __name__ == "__main__":
     main()

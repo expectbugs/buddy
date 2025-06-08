@@ -17,6 +17,9 @@ import hashlib
 import threading
 from collections import OrderedDict
 
+# Rule 3 Compliance - Exception hierarchy
+from exceptions import ContextExpansionError
+
 class ContextExpansionDecision:
     """
     Decides when and how to expand memory context based on relevance and criteria
@@ -543,9 +546,7 @@ class ContextExpander:
             
         except Exception as e:
             self.expansion_stats["expansion_failures"] += 1
-            logger.error(f"Context expansion failed: {e}")
-            # Return original results on failure - graceful degradation
-            return search_results
+            raise ContextExpansionError(f"Context expansion failed: {e}") from e
     
     def _expand_single_memory(self, memory_result: Dict[str, Any], user_query: str, candidate: Dict[str, Any]) -> Dict[str, Any]:
         """

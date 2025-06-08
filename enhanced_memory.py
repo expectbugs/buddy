@@ -22,10 +22,22 @@ from mem0 import Memory
 from context_logger import ContextLogger
 from context_bridge import ContextBridge
 from temporal_utils import get_current_datetime_info
+from exceptions import ContextLoggingError, ContextExpansionError, MemoryOperationError
+from debug_info import debug_tracker
+
+# Phase 2: Standard interfaces and result types
+from foundation_interface import MemoryFoundationInterface
+from result_types import (
+    OperationResult, MemorySearchResult, MemoryAddResult,
+    HealthCheckResult, DebugInfo,
+    MemorySearchOperationResult, MemoryAddOperationResult,
+    HealthCheckOperationResult, DebugInfoOperationResult,
+    BoolOperationResult, DictOperationResult
+)
 
 logger = logging.getLogger(__name__)
 
-class EnhancedMemory:
+class EnhancedMemory(MemoryFoundationInterface):
     """
     Enhanced wrapper around mem0's Memory class that adds:
     1. Automatic context logging with lookup codes
@@ -77,7 +89,28 @@ class EnhancedMemory:
         Phase 3 Note: Context logging happens at application level in run.py,
         not here. This keeps mem0 functionality pure and unchanged.
         """
-        return self.memory.add(messages, user_id=user_id, **kwargs)
+        start_time = time.time()
+        debug_tracker.log_operation("enhanced_memory", "add_start", {
+            "user_id": user_id,
+            "message_type": type(messages).__name__,
+            "message_count": len(messages) if isinstance(messages, list) else 1
+        })
+        
+        try:
+            result = self.memory.add(messages, user_id=user_id, **kwargs)
+            debug_tracker.log_operation("enhanced_memory", "add_complete", {
+                "user_id": user_id,
+                "operation_time_ms": (time.time() - start_time) * 1000,
+                "result_type": type(result).__name__
+            }, success=True)
+            return result
+        except Exception as e:
+            debug_tracker.log_operation("enhanced_memory", "add_failed", {
+                "user_id": user_id,
+                "error_type": type(e).__name__,
+                "operation_time_ms": (time.time() - start_time) * 1000
+            }, success=False, error=str(e))
+            raise
     
     # Delegate all other methods to the original mem0 Memory instance
     # This ensures 100% backward compatibility
@@ -86,6 +119,14 @@ class EnhancedMemory:
         """Enhanced search with memory operation tracking and optional context expansion"""
         start_time = time.time()
         expansion_enabled = (enable_expansion is not None and enable_expansion) or (enable_expansion is None and self.context_expander is not None)
+        
+        # Debug tracking: Log search start
+        debug_tracker.log_operation("enhanced_memory", "search_start", {
+            "query": query[:100],  # Truncate for debug
+            "user_id": user_id,
+            "limit": limit,
+            "expansion_enabled": expansion_enabled
+        })
         
         try:
             # Call original mem0 search
@@ -172,15 +213,29 @@ class EnhancedMemory:
                     user_id=user_id
                 )
             except Exception as e:
-                logger.warning(f"Memory operation logging failed for search: {e}")
+                raise ContextLoggingError(f"Memory operation logging failed for search: {e}") from e
             
             total_time = (time.time() - start_time) * 1000
             expanded_info = f", {result.get('expansion_metadata', {}).get('expanded_count', 0)} expanded" if expansion_enabled else ""
             logger.debug(f"Enhanced memory search completed (took {total_time:.1f}ms, found {len(result.get('results', [])) if result else 0} results{expanded_info})")
             
+            # Debug tracking: Log search completion
+            debug_tracker.log_operation("enhanced_memory", "search_complete", {
+                "query": query[:100],
+                "results_count": len(result.get('results', [])) if result else 0,
+                "search_time_ms": total_time,
+                "expansion_applied": expansion_enabled and self.context_expander is not None
+            }, success=True)
+            
             return result
             
         except Exception as e:
+            # Debug tracking: Log search failure
+            debug_tracker.log_operation("enhanced_memory", "search_failed", {
+                "query": query[:100],
+                "error_type": type(e).__name__,
+                "search_time_ms": (time.time() - start_time) * 1000
+            }, success=False, error=str(e))
             raise RuntimeError(f"MEM0 SEARCH FAILED in EnhancedMemory: {e}")
     
     def get_all(self, *args, **kwargs):
@@ -193,6 +248,12 @@ class EnhancedMemory:
     def update(self, memory_id: str, data: str, user_id: Optional[str] = None, **kwargs):
         """Enhanced update with memory operation tracking and automatic timestamp"""
         start_time = time.time()
+        
+        debug_tracker.log_operation("enhanced_memory", "update_start", {
+            "memory_id": memory_id,
+            "user_id": user_id or "unknown",
+            "data_length": len(str(data))
+        })
         
         try:
             # Add last_updated_at timestamp to metadata
@@ -218,9 +279,16 @@ class EnhancedMemory:
                     user_id=user_id
                 )
             except Exception as e:
-                logger.warning(f"Memory operation logging failed for update: {e}")
+                raise ContextLoggingError(f"Memory operation logging failed for update: {e}") from e
             
             logger.debug(f"Enhanced memory update completed (took {update_time:.1f}ms)")
+            
+            debug_tracker.log_operation("enhanced_memory", "update_complete", {
+                "memory_id": memory_id,
+                "user_id": user_id or "unknown",
+                "operation_time_ms": update_time
+            }, success=True)
+            
             return result
             
         except Exception as e:
@@ -238,7 +306,7 @@ class EnhancedMemory:
                     user_id=user_id
                 )
             except Exception as log_e:
-                logger.warning(f"Memory operation logging failed for failed update: {log_e}")
+                raise ContextLoggingError(f"Memory operation logging failed for failed update: {log_e}") from log_e
             
             raise RuntimeError(f"MEM0 UPDATE FAILED in EnhancedMemory: {e}")
     
@@ -294,7 +362,7 @@ class EnhancedMemory:
                     user_id=user_id
                 )
             except Exception as e:
-                logger.warning(f"Memory operation logging failed for archive: {e}")
+                raise ContextLoggingError(f"Memory operation logging failed for archive: {e}") from e
             
             logger.info(f"Memory {memory_id} archived instead of deleted (took {delete_time:.1f}ms)")
             return result
@@ -314,7 +382,7 @@ class EnhancedMemory:
                     user_id=user_id
                 )
             except Exception as log_e:
-                logger.warning(f"Memory operation logging failed for failed delete: {log_e}")
+                raise ContextLoggingError(f"Memory operation logging failed for failed delete: {log_e}") from log_e
             
             raise RuntimeError(f"MEM0 DELETE FAILED in EnhancedMemory: {e}")
     
@@ -344,6 +412,342 @@ class EnhancedMemory:
             return getattr(self.memory, name)
         except AttributeError:
             raise AttributeError(f"EnhancedMemory AND mem0.Memory DO NOT HAVE ATTRIBUTE: {name}")
+    
+    # ========== PHASE 2: STANDARDIZED INTERFACE IMPLEMENTATION ==========
+    
+    def search_memories(self, query: str, user_id: str, **options) -> MemorySearchOperationResult:
+        """
+        Standardized search interface for multi-agent use
+        
+        Args:
+            query: Search query string
+            user_id: User identifier
+            **options: Additional search options (limit, enable_expansion, etc.)
+            
+        Returns:
+            OperationResult[MemorySearchResult] with success/error status
+        """
+        operation_id = f"search_{int(time.time() * 1000)}"
+        debug_tracker.log_operation("enhanced_memory", "search_memories_start", {
+            "operation_id": operation_id,
+            "query": query[:100],
+            "user_id": user_id,
+            "options": str(options)[:200]
+        })
+        
+        try:
+            start_time = time.time()
+            
+            # Call existing search method
+            raw_result = self.search(query, user_id, **options)
+            
+            search_time = (time.time() - start_time) * 1000
+            
+            # Convert to standard format
+            search_result = MemorySearchResult(
+                results=raw_result.get('results', []),
+                total_count=len(raw_result.get('results', [])),
+                search_time_ms=search_time,
+                query=query,
+                expansion_applied=raw_result.get('expansion_metadata', {}).get('expanded_count', 0) > 0,
+                expansion_metadata=raw_result.get('expansion_metadata')
+            )
+            
+            debug_tracker.log_operation("enhanced_memory", "search_memories_success", {
+                "operation_id": operation_id,
+                "results_count": search_result.total_count,
+                "search_time_ms": search_time,
+                "expansion_applied": search_result.expansion_applied
+            }, success=True)
+            
+            return OperationResult.success_result(search_result, {
+                "operation_id": operation_id,
+                "component": "enhanced_memory"
+            })
+            
+        except Exception as e:
+            debug_tracker.log_operation("enhanced_memory", "search_memories_failed", {
+                "operation_id": operation_id,
+                "error": str(e)
+            }, success=False, error=str(e))
+            
+            return OperationResult.error_result(
+                f"Memory search failed: {e}",
+                {"operation_id": operation_id, "component": "enhanced_memory"}
+            )
+    
+    def add_memory(self, data: Any, user_id: str, **options) -> MemoryAddOperationResult:
+        """
+        Standardized add interface for multi-agent use
+        
+        Args:
+            data: Memory data (string, dict, or list of messages)
+            user_id: User identifier
+            **options: Additional options (metadata, etc.)
+            
+        Returns:
+            OperationResult[MemoryAddResult] with success/error status
+        """
+        operation_id = f"add_{int(time.time() * 1000)}"
+        debug_tracker.log_operation("enhanced_memory", "add_memory_start", {
+            "operation_id": operation_id,
+            "user_id": user_id,
+            "data_type": type(data).__name__
+        })
+        
+        try:
+            start_time = time.time()
+            
+            # Call existing add method
+            raw_result = self.add(data, user_id, **options)
+            
+            operation_time = (time.time() - start_time) * 1000
+            
+            # Extract lookup codes if available
+            lookup_codes = []
+            if raw_result and isinstance(raw_result, dict) and 'results' in raw_result:
+                for memory_item in raw_result['results']:
+                    if 'metadata' in memory_item and 'context_lookup_code' in memory_item['metadata']:
+                        lookup_codes.append(memory_item['metadata']['context_lookup_code'])
+            
+            # Convert to standard format
+            add_result = MemoryAddResult(
+                memories_added=raw_result.get('results', []) if raw_result else [],
+                relationships_extracted=raw_result.get('relationships', []) if raw_result else [],
+                operation_time_ms=operation_time,
+                lookup_codes=lookup_codes
+            )
+            
+            debug_tracker.log_operation("enhanced_memory", "add_memory_success", {
+                "operation_id": operation_id,
+                "memories_added": len(add_result.memories_added),
+                "relationships_extracted": len(add_result.relationships_extracted),
+                "operation_time_ms": operation_time
+            }, success=True)
+            
+            return OperationResult.success_result(add_result, {
+                "operation_id": operation_id,
+                "component": "enhanced_memory"
+            })
+            
+        except Exception as e:
+            debug_tracker.log_operation("enhanced_memory", "add_memory_failed", {
+                "operation_id": operation_id,
+                "error": str(e)
+            }, success=False, error=str(e))
+            
+            return OperationResult.error_result(
+                f"Memory add failed: {e}",
+                {"operation_id": operation_id, "component": "enhanced_memory"}
+            )
+    
+    def update_memory(self, memory_id: str, data: Any, user_id: str, **options) -> BoolOperationResult:
+        """
+        Standardized update interface for multi-agent use
+        
+        Args:
+            memory_id: ID of memory to update
+            data: New memory data
+            user_id: User identifier
+            **options: Additional update options
+            
+        Returns:
+            OperationResult[bool] indicating success/failure
+        """
+        operation_id = f"update_{int(time.time() * 1000)}"
+        debug_tracker.log_operation("enhanced_memory", "update_memory_start", {
+            "operation_id": operation_id,
+            "memory_id": memory_id,
+            "user_id": user_id
+        })
+        
+        try:
+            # Call existing update method
+            self.update(memory_id, str(data), user_id, **options)
+            
+            debug_tracker.log_operation("enhanced_memory", "update_memory_success", {
+                "operation_id": operation_id
+            }, success=True)
+            
+            return OperationResult.success_result(True, {
+                "operation_id": operation_id,
+                "component": "enhanced_memory"
+            })
+            
+        except Exception as e:
+            debug_tracker.log_operation("enhanced_memory", "update_memory_failed", {
+                "operation_id": operation_id,
+                "error": str(e)
+            }, success=False, error=str(e))
+            
+            return OperationResult.error_result(
+                f"Memory update failed: {e}",
+                {"operation_id": operation_id, "component": "enhanced_memory"}
+            )
+    
+    def delete_memory(self, memory_id: str, user_id: str, **options) -> BoolOperationResult:
+        """
+        Standardized delete/archive interface for multi-agent use
+        
+        Args:
+            memory_id: ID of memory to delete
+            user_id: User identifier
+            **options: Additional delete options
+            
+        Returns:
+            OperationResult[bool] indicating success/failure
+        """
+        operation_id = f"delete_{int(time.time() * 1000)}"
+        debug_tracker.log_operation("enhanced_memory", "delete_memory_start", {
+            "operation_id": operation_id,
+            "memory_id": memory_id,
+            "user_id": user_id
+        })
+        
+        try:
+            # Call existing delete method (which archives)
+            self.delete(memory_id, user_id, **options)
+            
+            debug_tracker.log_operation("enhanced_memory", "delete_memory_success", {
+                "operation_id": operation_id
+            }, success=True)
+            
+            return OperationResult.success_result(True, {
+                "operation_id": operation_id,
+                "component": "enhanced_memory"
+            })
+            
+        except Exception as e:
+            debug_tracker.log_operation("enhanced_memory", "delete_memory_failed", {
+                "operation_id": operation_id,
+                "error": str(e)
+            }, success=False, error=str(e))
+            
+            return OperationResult.error_result(
+                f"Memory delete failed: {e}",
+                {"operation_id": operation_id, "component": "enhanced_memory"}
+            )
+    
+    def get_all_memories(self, user_id: str, **options) -> DictOperationResult:
+        """
+        Standardized get all memories interface for multi-agent use
+        
+        Args:
+            user_id: User identifier
+            **options: Additional retrieval options
+            
+        Returns:
+            OperationResult[Dict] with memories data
+        """
+        operation_id = f"get_all_{int(time.time() * 1000)}"
+        debug_tracker.log_operation("enhanced_memory", "get_all_memories_start", {
+            "operation_id": operation_id,
+            "user_id": user_id
+        })
+        
+        try:
+            # Call existing get_all method
+            result = self.get_all(user_id=user_id, **options)
+            
+            debug_tracker.log_operation("enhanced_memory", "get_all_memories_success", {
+                "operation_id": operation_id,
+                "memory_count": len(result.get('results', [])) if result else 0
+            }, success=True)
+            
+            return OperationResult.success_result(result, {
+                "operation_id": operation_id,
+                "component": "enhanced_memory"
+            })
+            
+        except Exception as e:
+            debug_tracker.log_operation("enhanced_memory", "get_all_memories_failed", {
+                "operation_id": operation_id,
+                "error": str(e)
+            }, success=False, error=str(e))
+            
+            return OperationResult.error_result(
+                f"Get all memories failed: {e}",
+                {"operation_id": operation_id, "component": "enhanced_memory"}
+            )
+    
+    def get_health_status(self) -> HealthCheckOperationResult:
+        """
+        Get enhanced memory component health with standardized result
+        
+        Returns:
+            OperationResult[HealthCheckResult] with health information
+        """
+        try:
+            start_time = time.time()
+            
+            # Check if underlying memory system is accessible
+            test_result = self.memory.get_all(user_id="health_check_test")
+            
+            response_time = (time.time() - start_time) * 1000
+            
+            health_result = HealthCheckResult(
+                component="enhanced_memory",
+                status="healthy",
+                response_time_ms=response_time,
+                details={
+                    "context_logger_active": self.context_logger is not None,
+                    "context_expander_active": self.context_expander is not None,
+                    "base_memory_accessible": True,
+                    "base_memory_type": type(self.memory).__name__
+                }
+            )
+            
+            return OperationResult.success_result(health_result)
+            
+        except Exception as e:
+            health_result = HealthCheckResult(
+                component="enhanced_memory",
+                status="unhealthy",
+                response_time_ms=None,
+                details={
+                    "context_logger_active": self.context_logger is not None,
+                    "context_expander_active": self.context_expander is not None,
+                    "base_memory_accessible": False
+                },
+                error=str(e)
+            )
+            
+            return OperationResult.success_result(health_result)  # Health check itself succeeded
+    
+    def get_debug_info(self) -> DebugInfoOperationResult:
+        """
+        Get debug information about enhanced memory with standardized result
+        
+        Returns:
+            OperationResult[DebugInfo] with debug data
+        """
+        try:
+            recent_ops = debug_tracker.get_recent_operations(10, "enhanced_memory")
+            component_state = debug_tracker.get_component_state("enhanced_memory")
+            
+            # Get enhanced memory stats
+            try:
+                enhanced_stats = self.get_enhanced_stats()
+            except Exception:
+                enhanced_stats = {"error": "Could not retrieve enhanced stats"}
+            
+            debug_info = DebugInfo(
+                component="enhanced_memory",
+                recent_operations=recent_ops,
+                component_state=component_state,
+                statistics=enhanced_stats,
+                configuration={
+                    "context_logger_enabled": self.context_logger is not None,
+                    "context_expander_enabled": self.context_expander is not None,
+                    "base_memory_type": type(self.memory).__name__,
+                    "has_graph_store": hasattr(self.memory, 'graph') and self.memory.graph is not None
+                }
+            )
+            
+            return OperationResult.success_result(debug_info)
+            
+        except Exception as e:
+            return OperationResult.error_result(f"Debug info retrieval failed: {e}")
     
     def get_context_for_memory(self, memory_id: str, memory_metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -423,3 +827,5 @@ class EnhancedMemory:
             }
         except Exception as e:
             raise RuntimeError(f"FAILED TO GET ENHANCED MEMORY STATS: {e}")
+    
+    # ========== END PHASE 2 INTERFACE ==========
