@@ -119,11 +119,36 @@ class LoggingConfig:
 
 
 @dataclass
+class InterfaceConfig:
+    """User interface configuration"""
+    silent_mode: bool = False
+    show_startup_messages: bool = True
+    show_command_help: bool = True
+
+    def validate(self) -> List[str]:
+        """Validate interface configuration"""
+        errors = []
+        
+        # Boolean values don't need validation, but we can add future checks here
+        if not isinstance(self.silent_mode, bool):
+            errors.append(f"silent_mode must be boolean, got {type(self.silent_mode)}")
+        
+        if not isinstance(self.show_startup_messages, bool):
+            errors.append(f"show_startup_messages must be boolean, got {type(self.show_startup_messages)}")
+        
+        if not isinstance(self.show_command_help, bool):
+            errors.append(f"show_command_help must be boolean, got {type(self.show_command_help)}")
+        
+        return errors
+
+
+@dataclass
 class SystemConfig:
     """Complete system configuration"""
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    interface: InterfaceConfig = field(default_factory=InterfaceConfig)
     
     def validate(self) -> OperationResult[bool]:
         """
@@ -136,6 +161,7 @@ class SystemConfig:
         all_errors.extend(self.database.validate())
         all_errors.extend(self.memory.validate())
         all_errors.extend(self.logging.validate())
+        all_errors.extend(self.interface.validate())
         
         if all_errors:
             return OperationResult.error_result(f"Configuration validation failed: {'; '.join(all_errors)}")
@@ -167,6 +193,11 @@ class SystemConfig:
                 "max_log_files": self.logging.max_log_files,
                 "max_operations_tracked": self.logging.max_operations_tracked,
                 "debug_level": self.logging.debug_level
+            },
+            "interface": {
+                "silent_mode": self.interface.silent_mode,
+                "show_startup_messages": self.interface.show_startup_messages,
+                "show_command_help": self.interface.show_command_help
             }
         }
     
@@ -176,11 +207,13 @@ class SystemConfig:
         database_config = DatabaseConfig(**data.get("database", {}))
         memory_config = MemoryConfig(**data.get("memory", {}))
         logging_config = LoggingConfig(**data.get("logging", {}))
+        interface_config = InterfaceConfig(**data.get("interface", {}))
         
         return cls(
             database=database_config,
             memory=memory_config,
-            logging=logging_config
+            logging=logging_config,
+            interface=interface_config
         )
 
 

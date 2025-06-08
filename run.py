@@ -12,6 +12,7 @@ import os
 import sys
 import re
 import logging
+import argparse
 from typing import Dict, List, Optional, Any, Set
 from datetime import datetime, timezone
 from mem0 import Memory
@@ -39,15 +40,11 @@ from config_manager import config_manager
 # Phase 3: Multi-agent foundation
 from multi_agent_foundation import MultiAgentMemoryFoundation
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# Silent mode output management
+from output_manager import initialize_output_manager, get_output_manager
 
-# Suppress HTTP request logs from httpx and openai unless in debug mode
-if os.getenv("DEBUG", "").lower() != "true":
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("openai").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
+# Logging will be configured after parsing arguments to respect silent mode
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -475,19 +472,21 @@ class ImprovedMem0Assistant:
         # Display results
         total_items = len(memories_found) + len(relations_found)
         if total_items > 0:
-            print(f"\nAll stored memories ({total_items} items):")
+            output_manager = get_output_manager()
+            output_manager.print_explicit_command_result(f"\nAll stored memories ({total_items} items):")
             count = 1
             if memories_found:
                 for memory in memories_found:
-                    print(f"{count}. {memory}")
+                    output_manager.print_explicit_command_result(f"{count}. {memory}")
                     count += 1
             if relations_found:
-                print(f"\nRelationships:")
+                output_manager.print_explicit_command_result(f"\nRelationships:")
                 for relation in relations_found:
-                    print(f"{count}. {relation}")
+                    output_manager.print_explicit_command_result(f"{count}. {relation}")
                     count += 1
         else:
-            print("\nNo memories found.")
+            output_manager = get_output_manager()
+            output_manager.print_explicit_command_result("\nNo memories found.")
     
     def show_all_relationships(self, user_id: str):
         """Display all relationship/graph data"""
@@ -496,7 +495,8 @@ class ImprovedMem0Assistant:
             relationships = self.memory.graph.get_all(filters={'user_id': user_id})
             
             if relationships:
-                print(f"\nAll stored relationships ({len(relationships)} items):")
+                output_manager = get_output_manager()
+                output_manager.print_explicit_command_result(f"\nAll stored relationships ({len(relationships)} items):")
                 
                 # Group relationships by type for better display (with filtering)
                 by_relation = {}
@@ -513,16 +513,18 @@ class ImprovedMem0Assistant:
                 
                 # Display grouped relationships
                 for relation_type, rels in by_relation.items():
-                    print(f"\n  {relation_type.upper()} relationships:")
+                    output_manager.print_explicit_command_result(f"\n  {relation_type.upper()} relationships:")
                     for rel in rels:
                         source = rel.get('source', 'unknown')
                         target = rel.get('target', rel.get('destination', 'unknown'))
-                        print(f"    • {source} → {target}")
+                        output_manager.print_explicit_command_result(f"    • {source} → {target}")
             else:
-                print("\nNo relationships found.")
+                output_manager = get_output_manager()
+                output_manager.print_explicit_command_result("\nNo relationships found.")
                 
         except Exception as e:
-            print(f"\nError retrieving relationships: {e}")
+            output_manager = get_output_manager()
+            output_manager.print_error(f"Error retrieving relationships: {e}")
             logger.error(f"Error in show_all_relationships: {e}")
     
     def search_relationships(self, query: str, user_id: str):
@@ -564,17 +566,20 @@ class ImprovedMem0Assistant:
                     continue
             
             if all_results:
-                print(f"\nRelationships matching '{query}' ({len(all_results)} items):")
+                output_manager = get_output_manager()
+                output_manager.print_explicit_command_result(f"\nRelationships matching '{query}' ({len(all_results)} items):")
                 for i, rel in enumerate(all_results, 1):
                     source = rel.get('source', 'unknown')
                     relation = rel.get('relationship', 'unknown')
                     target = rel.get('target', rel.get('destination', 'unknown'))
-                    print(f"{i}. {source} --{relation}--> {target}")
+                    output_manager.print_explicit_command_result(f"{i}. {source} --{relation}--> {target}")
             else:
-                print(f"\nNo relationships found matching '{query}'.")
+                output_manager = get_output_manager()
+                output_manager.print_explicit_command_result(f"\nNo relationships found matching '{query}'.")
                 
         except Exception as e:
-            print(f"\nError searching relationships: {e}")
+            output_manager = get_output_manager()
+            output_manager.print_error(f"Error searching relationships: {e}")
             logger.error(f"Error in search_relationships: {e}")
     
     def show_context_for_memory(self, memory_id: str, user_id: str):
@@ -598,7 +603,7 @@ class ImprovedMem0Assistant:
             metadata = target_memory.get('metadata', {})
             lookup_code = metadata.get('context_lookup_code')
             
-            print(f"\n=== Context for Memory {memory_id} ===")
+            output_manager.print_explicit_command_result(f"\n=== Context for Memory {memory_id} ===")
             print(f"Memory: {target_memory.get('memory', 'N/A')}")
             
             if lookup_code:
@@ -664,7 +669,7 @@ class ImprovedMem0Assistant:
                 return
             
             # Display the conversation context
-            print(f"\n=== Full Context for {lookup_code} ===")
+            output_manager.print_explicit_command_result(f"\n=== Full Context for {lookup_code} ===")
             print(f"Timestamp: {target_log.get('timestamp', 'Unknown')}")
             print(f"User ID: {target_log.get('user_id', 'Unknown')}")
             print()
@@ -703,7 +708,7 @@ class ImprovedMem0Assistant:
             return
         
         try:
-            print(f"\n=== Expanding Last Search Results ===")
+            output_manager.print_explicit_command_result(f"\n=== Expanding Last Search Results ===")
             print(f"Original Query: {self.last_search_query}")
             
             # Force expansion on the last search results
@@ -742,7 +747,7 @@ class ImprovedMem0Assistant:
     def show_conversation_timeline(self, user_id: str, date_filter: Optional[str] = None):
         """Show conversation timeline with context links"""
         try:
-            print(f"\n=== Conversation Timeline ===")
+            output_manager.print_explicit_command_result(f"\n=== Conversation Timeline ===")
             if date_filter:
                 print(f"Filtered by: {date_filter}")
             
@@ -807,74 +812,263 @@ class ImprovedMem0Assistant:
         except Exception as e:
             logger.warning(f"Could not get expansion stats: {e}")
 
+
+def configure_logging(silent_mode: bool = False):
+    """
+    Configure logging based on silent mode
+    
+    Args:
+        silent_mode: If True, suppress all console logging
+    """
+    # Clear any existing configuration
+    logging.getLogger().handlers.clear()
+    
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    
+    # Always set up file logging for debugging
+    try:
+        import os
+        log_dir = "/var/log/buddy"
+        os.makedirs(log_dir, exist_ok=True)
+        
+        file_handler = logging.FileHandler(f"{log_dir}/buddy.log")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        logging.getLogger().addHandler(file_handler)
+    except Exception:
+        # If file logging fails, continue without it
+        pass
+    
+    # Set up console logging only if NOT in silent mode
+    if not silent_mode:
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
+        logging.getLogger().addHandler(console_handler)
+    
+    # Set root logger level
+    logging.getLogger().setLevel(logging.DEBUG if not silent_mode else logging.CRITICAL)
+    
+    # Configure third-party loggers
+    debug_enabled = os.getenv("DEBUG", "").lower() == "true"
+    
+    if silent_mode:
+        # In silent mode, suppress ALL third-party logging to console
+        logging.getLogger("httpx").setLevel(logging.CRITICAL)
+        logging.getLogger("openai").setLevel(logging.CRITICAL)
+        logging.getLogger("httpcore").setLevel(logging.CRITICAL)
+        logging.getLogger("mem0").setLevel(logging.CRITICAL)
+        logging.getLogger("qdrant_client").setLevel(logging.CRITICAL)
+        logging.getLogger("neo4j").setLevel(logging.CRITICAL)
+    elif not debug_enabled:
+        # In normal mode without debug, suppress verbose third-party logs
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("openai").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        logging.getLogger("mem0").setLevel(logging.WARNING)
+        logging.getLogger("qdrant_client").setLevel(logging.WARNING)
+
+
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description="Buddy Memory System - Multi-Agent AI Foundation",
+        epilog="Use --silent to suppress all output except conversation"
+    )
+    
+    parser.add_argument(
+        "-s", "--silent", 
+        action="store_true",
+        help="Enable silent mode (suppress all output except user input and LLM responses)"
+    )
+    
+    parser.add_argument(
+        "--config",
+        help="Path to configuration file (optional)"
+    )
+    
+    return parser.parse_args()
+
+
 def main():
     """Main chat loop"""
-    assistant = ImprovedMem0Assistant()
+    # Parse command line arguments
+    args = parse_arguments()
+    
+    # Configure logging FIRST, before any other imports/initialization
+    configure_logging(silent_mode=args.silent)
+    
+    # Apply silent mode from command line if specified
+    config_overrides = {}
+    if args.silent:
+        config_overrides = {
+            "interface": {
+                "silent_mode": True
+            }
+        }
+    
+    # Initialize assistant with config overrides
+    assistant = ImprovedMem0Assistant(config_overrides)
     user_id = "adam_001"  # Better user ID
     
-    print("Buddy Memory System Ready - Phase 3: Multi-Agent Foundation!")
-    print("Commands:")
-    print("  'memories' - show all stored memories")
-    print("  'relationships' - show all relationship/graph data")
-    print("  'search relationships <query>' - search for specific relationships")
-    print("  'forget X' - remove memories about X")
-    print("  '/context <memory_id>' - show full context for specific memory")
-    print("  '/expand' - manually expand last search results")
-    print("  '/timeline [date]' - show conversation timeline with context links")
-    print("  '/expansion on/off' - toggle automatic context expansion")
-    print("")
-    print("Debug Commands:")
-    print("  '/debug' - show comprehensive debug information")
-    print("  '/debug operations' - show recent operations")
-    print("  '/debug errors' - show recent failed operations")
-    print("  '/debug stats' - show debug statistics")
-    print("  '/debug clear' - clear debug history")
-    print("")
-    print("System Commands:")
-    print("  '/health' - comprehensive system health check")
-    print("  '/health neo4j' - check Neo4j status")
-    print("  '/health qdrant' - check Qdrant status")
-    print("  '/health filesystem' - check file system access")
-    print("  '/health debug' - check debug system status")
-    print("")
-    print("Configuration Commands:")
-    print("  '/config' - show current configuration")
-    print("  '/config save' - save current configuration to file")
-    print("  '/config reload' - reload configuration from file")
-    print("  '/config set <key> <value>' - set configuration value")
-    print("  '/config get <key>' - get specific configuration value")
-    print("")
-    print("Multi-Agent Commands:")
-    print("  '/agents' - list all agent namespaces")
-    print("  '/agent create <id> <type>' - create new agent namespace")
-    print("  '/agent <id> search <query>' - search using specific agent")
-    print("  '/plugins' - list all registered plugins")
-    print("  '/foundation health' - comprehensive foundation health")
-    print("  '/foundation debug' - comprehensive debug information")
-    print("  '/foundation stats' - foundation statistics")
-    print("  'quit' - exit")
-    print()
+    # Initialize output manager with the assistant's configuration
+    output_manager = initialize_output_manager(assistant.system_config)
+    
+    # Display startup messages and help
+    startup_messages = [
+        "Buddy Memory System Ready - Phase 3: Multi-Agent Foundation!",
+        "Commands:",
+        "  '/memories' - show all stored memories",
+        "  '/relationships' - show all relationship/graph data", 
+        "  '/search relationships <query>' - search for specific relationships",
+        "  '/forget <X>' - remove memories about X",
+        "  '/context <memory_id>' - show full context for specific memory",
+        "  '/expand' - manually expand last search results",
+        "  '/timeline [date]' - show conversation timeline with context links",
+        "  '/expansion on/off' - toggle automatic context expansion",
+        "",
+        "Debug Commands:",
+        "  '/debug' - show comprehensive debug information",
+        "  '/debug operations' - show recent operations",
+        "  '/debug errors' - show recent failed operations", 
+        "  '/debug stats' - show debug statistics",
+        "  '/debug clear' - clear debug history",
+        "",
+        "System Commands:",
+        "  '/health' - comprehensive system health check",
+        "  '/health neo4j' - check Neo4j status",
+        "  '/health qdrant' - check Qdrant status",
+        "  '/health filesystem' - check file system access",
+        "  '/health debug' - check debug system status",
+        "",
+        "Configuration Commands:",
+        "  '/config' - show current configuration",
+        "  '/config save' - save current configuration to file",
+        "  '/config reload' - reload configuration from file",
+        "  '/config set <key> <value>' - set configuration value",
+        "  '/config get <key>' - get specific configuration value",
+        "",
+        "Multi-Agent Commands:",
+        "  '/agents' - list all agent namespaces",
+        "  '/agent create <id> <type>' - create new agent namespace",
+        "  '/agent <id> search <query>' - search using specific agent",
+        "  '/plugins' - list all registered plugins",
+        "  '/foundation health' - comprehensive foundation health",
+        "  '/foundation debug' - comprehensive debug information",
+        "  '/foundation stats' - foundation statistics",
+        "  '/silent on/off' - toggle silent mode",
+        "  '/help' - show detailed command reference",
+        "  'quit' - exit",
+        ""
+    ]
+    
+    output_manager.print_startup_messages(startup_messages)
     
     while True:
-        user_input = input("You: ").strip()
+        if output_manager.silent_mode:
+            user_input = input().strip()
+        else:
+            user_input = output_manager.input_prompt("You: ").strip()
         
         if user_input.lower() in ['quit', 'exit']:
             break
+        
+        if user_input.lower() == '/help':
+            # Display comprehensive help - always shown even in silent mode
+            help_text = """
+=== BUDDY MEMORY SYSTEM - COMMAND REFERENCE ===
+
+BASIC COMMANDS:
+  /memories                    - Show all stored memories and relationships
+  /relationships               - Show all relationship/graph data organized by type
+  /search relationships <query> - Search for specific relationships (case-insensitive)
+  /forget <entity>             - Remove all memories about specified entity
+  
+CONTEXT & ANALYSIS:
+  /context <memory_id>         - Show full conversation context for specific memory
+  /expand                      - Manually expand last search results with full context
+  /timeline [date]             - Show conversation timeline with context links
+  /expansion on/off            - Toggle automatic context expansion during searches
+
+DEBUG & MONITORING:
+  /debug                       - Show comprehensive debug information and statistics
+  /debug operations            - Show recent system operations (last 10)
+  /debug errors                - Show recent failed operations with details
+  /debug stats                 - Show detailed debug statistics by component
+  /debug clear                 - Clear debug history and reset counters
+
+SYSTEM HEALTH:
+  /health                      - Comprehensive system health check (all components)
+  /health neo4j                - Check Neo4j graph database status and connectivity
+  /health qdrant               - Check Qdrant vector database status and collections
+  /health filesystem           - Check file system access and permissions
+  /health debug                - Check debug system status and operation tracking
+
+CONFIGURATION:
+  /config                      - Show current system configuration
+  /config save                 - Save current configuration to file
+  /config reload               - Reload configuration from file
+  /config set <key> <value>    - Set configuration value (e.g., /config set memory.relevance_threshold 0.7)
+  /config get <key>            - Get specific configuration value (e.g., /config get database)
+
+MULTI-AGENT SYSTEM:
+  /agents                      - List all agent namespaces and their status
+  /agent create <id> <type>    - Create new agent namespace (e.g., /agent create scheduler calendar_agent)
+  /agent <id> search <query>   - Search using specific agent's custom processing
+  /plugins                     - List all registered plugins (processors, expanders, filters)
+  /foundation health           - Comprehensive multi-agent foundation health check
+  /foundation debug            - Foundation debug information and recent operations
+  /foundation stats            - Foundation statistics (agents, plugins, operations)
+
+INTERFACE CONTROL:
+  /silent on/off               - Toggle silent mode (suppress system messages, keep commands)
+  /help                        - Show this help information (always displayed)
+  quit / exit                  - Exit the system
+
+USAGE EXAMPLES:
+  /search relationships john   - Find all relationships involving 'john'
+  /forget unladen_swallow      - Remove all memories about unladen swallows
+  /config set memory.relevance_threshold 0.8  - Adjust memory relevance threshold
+  /agent create scheduler calendar_agent       - Create calendar management agent
+  /debug operations            - See what the system has been doing recently
+
+AUTOMATION TIPS:
+  - Use --silent flag for pure input/output automation
+  - All commands work in silent mode when explicitly called
+  - Commands starting with '/' ensure consistent interface
+  - File logging always available at /var/log/buddy/buddy.log
+
+==============================================================="""
             
-        if user_input.lower() == 'memories':
+            output_manager.print_explicit_command_result(help_text)
+            continue
+            
+        if user_input.lower() == '/memories':
             assistant.show_all_memories(user_id)
             continue
             
-        if user_input.lower() == 'relationships':
+        if user_input.lower() == '/relationships':
             assistant.show_all_relationships(user_id)
             continue
             
-        if user_input.lower().startswith('search relationships '):
-            query = user_input[len('search relationships '):].strip()
+        if user_input.lower().startswith('/search relationships '):
+            query = user_input[len('/search relationships '):].strip()
             if query:
                 assistant.search_relationships(query, user_id)
             else:
-                print("Please specify a search query. Example: 'search relationships Dave'")
+                output_manager.print_explicit_command_result("Please specify a search query. Example: '/search relationships Dave'")
+            continue
+        
+        if user_input.lower().startswith('/forget '):
+            entity_to_forget = user_input[len('/forget '):].strip()
+            if entity_to_forget:
+                if assistant.process_forget_request(f"forget {entity_to_forget}", user_id):
+                    output_manager.print_explicit_command_result(f"Forgotten memories about: {entity_to_forget}")
+                else:
+                    output_manager.print_explicit_command_result(f"No memories found about: {entity_to_forget}")
+            else:
+                output_manager.print_explicit_command_result("Please specify what to forget. Example: '/forget John'")
             continue
         
         # Phase 3C Commands
@@ -889,7 +1083,7 @@ def main():
                     # This is a memory ID - use existing method
                     assistant.show_context_for_memory(context_identifier, user_id)
             else:
-                print("Please specify a memory ID or lookup code. Example: '/context CTX-123' or '/context mem_123'")
+                output_manager.print_command_result("Please specify a memory ID or lookup code. Example: '/context CTX-123' or '/context mem_123'")
             continue
         
         if user_input.lower() == '/expand':
@@ -909,7 +1103,29 @@ def main():
             elif setting == 'off':
                 assistant.toggle_expansion(False)
             else:
-                print("Please specify 'on' or 'off'. Example: '/expansion on'")
+                output_manager.print_command_result("Please specify 'on' or 'off'. Example: '/expansion on'")
+            continue
+        
+        # Silent mode commands
+        if user_input.startswith('/silent'):
+            parts = user_input.split(' ', 1)
+            if len(parts) == 1:
+                # Show current silent mode status
+                status = "enabled" if output_manager.silent_mode else "disabled"
+                output_manager.print_command_result(f"\nSilent mode is currently {status}")
+                output_manager.print_command_result("Use '/silent on' or '/silent off' to change")
+            elif len(parts) == 2:
+                setting = parts[1].strip().lower()
+                if setting == 'on':
+                    output_manager.set_silent_mode(True)
+                    configure_logging(silent_mode=True)
+                    output_manager.print_command_result("Silent mode enabled. Only conversation will be displayed.")
+                elif setting == 'off':
+                    output_manager.set_silent_mode(False)
+                    configure_logging(silent_mode=False)
+                    output_manager.print_command_result("Silent mode disabled. All system messages will be displayed.")
+                else:
+                    output_manager.print_command_result("Please specify 'on' or 'off'. Example: '/silent on'")
             continue
         
         # Debug commands
@@ -919,24 +1135,24 @@ def main():
                 # Show comprehensive debug information
                 try:
                     summary = debug_tracker.get_debug_summary()
-                    print(f"\n=== DEBUG SUMMARY ===")
-                    print(f"Total Operations: {summary['total_operations']}")
-                    print(f"Error Count: {summary['error_count']}")
-                    print(f"Components Active: {len(summary['component_activity'])}")
-                    print(f"Timestamp: {summary['timestamp']}")
-                    print(f"\nComponent Activity:")
+                    output_manager.print_explicit_command_result(f"\n=== DEBUG SUMMARY ===")
+                    output_manager.print_explicit_command_result(f"Total Operations: {summary['total_operations']}")
+                    output_manager.print_explicit_command_result(f"Error Count: {summary['error_count']}")
+                    output_manager.print_explicit_command_result(f"Components Active: {len(summary['component_activity'])}")
+                    output_manager.print_explicit_command_result(f"Timestamp: {summary['timestamp']}")
+                    output_manager.print_explicit_command_result(f"\nComponent Activity:")
                     for comp, count in summary['component_activity'].items():
-                        print(f"  {comp}: {count} operations")
-                    print(f"\nComponent States:")
+                        output_manager.print_explicit_command_result(f"  {comp}: {count} operations")
+                    output_manager.print_explicit_command_result(f"\nComponent States:")
                     for comp, state_info in summary['component_states'].items():
-                        print(f"  {comp}: {state_info['timestamp']}")
+                        output_manager.print_explicit_command_result(f"  {comp}: {state_info['timestamp']}")
                 except Exception as e:
-                    print(f"Debug summary failed: {e}")
+                    output_manager.print_explicit_command_result(f"Debug summary failed: {e}")
             elif parts[1].strip() == 'operations':
                 # Show recent operations
                 try:
                     ops = debug_tracker.get_recent_operations(20)
-                    print(f"\n=== RECENT OPERATIONS ({len(ops)}) ===")
+                    output_manager.print_explicit_command_result(f"\n=== RECENT OPERATIONS ({len(ops)}) ===")
                     for i, op in enumerate(ops[-10:], 1):  # Show last 10
                         status = "✓" if op['success'] else "✗"
                         print(f"{i}. {status} {op['component']}.{op['operation']} at {op['timestamp']}")
@@ -948,7 +1164,7 @@ def main():
                 # Show recent failed operations
                 try:
                     errors = debug_tracker.get_error_operations(10)
-                    print(f"\n=== RECENT ERRORS ({len(errors)}) ===")
+                    output_manager.print_explicit_command_result(f"\n=== RECENT ERRORS ({len(errors)}) ===")
                     for i, error_op in enumerate(errors, 1):
                         print(f"{i}. ✗ {error_op['component']}.{error_op['operation']} at {error_op['timestamp']}")
                         print(f"   Error: {error_op['error']}")
@@ -960,7 +1176,7 @@ def main():
                 # Show debug statistics
                 try:
                     stats = debug_tracker.get_statistics()
-                    print(f"\n=== DEBUG STATISTICS ===")
+                    output_manager.print_explicit_command_result(f"\n=== DEBUG STATISTICS ===")
                     print(f"Total Operations: {stats['total_operations']}")
                     print(f"Error Operations: {stats['error_operations']}")
                     print(f"Success Rate: {stats['success_rate']:.1f}%")
@@ -993,7 +1209,7 @@ def main():
                 if health_type == 'all' or health_type == '':
                     # Comprehensive health check
                     health_results = health_checker.comprehensive_health_check()
-                    print(f"\n=== SYSTEM HEALTH CHECK ===")
+                    output_manager.print_explicit_command_result(f"\n=== SYSTEM HEALTH CHECK ===")
                     print(f"Overall Status: {health_results['overall_status'].upper()}")
                     print(f"Check Duration: {health_results['check_duration_ms']:.1f}ms")
                     print(f"Components: {health_results['healthy_count']}/{health_results['total_components']} healthy")
@@ -1022,7 +1238,7 @@ def main():
                         
                 elif health_type == 'neo4j':
                     status = health_checker.check_neo4j()
-                    print(f"\n=== NEO4J HEALTH ===")
+                    output_manager.print_explicit_command_result(f"\n=== NEO4J HEALTH ===")
                     print(f"Status: {status['status']}")
                     print(f"URL: {status['url']}")
                     if status['error']:
@@ -1034,7 +1250,7 @@ def main():
                         
                 elif health_type == 'qdrant':
                     status = health_checker.check_qdrant()
-                    print(f"\n=== QDRANT HEALTH ===")
+                    output_manager.print_explicit_command_result(f"\n=== QDRANT HEALTH ===")
                     print(f"Status: {status['status']}")
                     print(f"URL: {status['url']}")
                     if status['error']:
@@ -1045,7 +1261,7 @@ def main():
                         
                 elif health_type == 'filesystem':
                     status = health_checker.check_file_system()
-                    print(f"\n=== FILE SYSTEM HEALTH ===")
+                    output_manager.print_explicit_command_result(f"\n=== FILE SYSTEM HEALTH ===")
                     print(f"Status: {status['status']}")
                     print(f"Directory: {status['directory_path']}")
                     print(f"Exists: {status['directory_exists']}")
@@ -1056,7 +1272,7 @@ def main():
                         
                 elif health_type == 'debug':
                     status = health_checker.check_debug_system()
-                    print(f"\n=== DEBUG SYSTEM HEALTH ===")
+                    output_manager.print_explicit_command_result(f"\n=== DEBUG SYSTEM HEALTH ===")
                     print(f"Status: {status['status']}")
                     if status['error']:
                         print(f"Error: {status['error']}")
@@ -1085,7 +1301,7 @@ def main():
                     if config_result.success:
                         config_dict = config_result.data
                         
-                        print(f"\n=== CURRENT CONFIGURATION ===")
+                        output_manager.print_explicit_command_result(f"\n=== CURRENT CONFIGURATION ===")
                         print(f"Config loaded from: {config_result.metadata.get('config_file', 'defaults')}")
                         print()
                         
@@ -1169,7 +1385,7 @@ def main():
                     get_result = config_manager.get_config(key)
                     
                     if get_result.success:
-                        print(f"\n=== CONFIGURATION VALUE ===")
+                        output_manager.print_explicit_command_result(f"\n=== CONFIGURATION VALUE ===")
                         for k, v in get_result.data.items():
                             if "password" in k.lower():
                                 print(f"{k}: {'*' * len(str(v))}")
@@ -1211,7 +1427,7 @@ def main():
                 if agents_result.success:
                     agents = agents_result.data
                     if agents:
-                        print(f"\n=== Active Agent Namespaces ({len(agents)}) ===")
+                        output_manager.print_explicit_command_result(f"\n=== Active Agent Namespaces ({len(agents)}) ===")
                         for agent_id, info in agents.items():
                             print(f"• {agent_id} ({info['agent_type']})")
                             print(f"  Created: {info.get('creation_time', 'unknown')}")
@@ -1264,7 +1480,7 @@ def main():
                         result = agent.search_memories(query)
                         if result.success:
                             search_data = result.data
-                            print(f"\n=== Agent {agent_id} Search Results ===")
+                            output_manager.print_explicit_command_result(f"\n=== Agent {agent_id} Search Results ===")
                             print(f"Query: {query}")
                             print(f"Results: {search_data.total_count}")
                             print(f"Search time: {search_data.search_time_ms:.1f}ms")
@@ -1297,7 +1513,7 @@ def main():
                     plugins = plugins_result.data
                     total_plugins = sum(len(plugin_list) for plugin_list in plugins.values())
                     
-                    print(f"\n=== Registered Plugins ({total_plugins}) ===")
+                    output_manager.print_explicit_command_result(f"\n=== Registered Plugins ({total_plugins}) ===")
                     
                     for plugin_type, plugin_list in plugins.items():
                         if plugin_list:
@@ -1324,7 +1540,7 @@ def main():
                     health_data = health_result.data
                     overall_healthy = health_result.metadata.get('overall_healthy', False)
                     
-                    print(f"\n=== FOUNDATION HEALTH ===")
+                    output_manager.print_explicit_command_result(f"\n=== FOUNDATION HEALTH ===")
                     print(f"Overall Status: {'✓ HEALTHY' if overall_healthy else '✗ UNHEALTHY'}")
                     print(f"Uptime: {health_data['uptime_seconds']:.1f}s")
                     print(f"Active Agents: {health_data['active_agents']}")
@@ -1361,7 +1577,7 @@ def main():
                 if debug_result.success:
                     debug_data = debug_result.data
                     
-                    print(f"\n=== FOUNDATION DEBUG INFO ===")
+                    output_manager.print_explicit_command_result(f"\n=== FOUNDATION DEBUG INFO ===")
                     foundation_info = debug_data.get('foundation_info', {})
                     print(f"Uptime: {foundation_info.get('uptime_seconds', 0):.1f}s")
                     print(f"Shared Operations: {foundation_info.get('shared_operations', 0)}")
@@ -1394,7 +1610,7 @@ def main():
                 if stats_result.success:
                     stats = stats_result.data
                     
-                    print(f"\n=== FOUNDATION STATISTICS ===")
+                    output_manager.print_explicit_command_result(f"\n=== FOUNDATION STATISTICS ===")
                     foundation_stats = stats.get('foundation', {})
                     print(f"Uptime: {foundation_stats.get('uptime_seconds', 0):.1f}s")
                     print(f"Shared Operations: {foundation_stats.get('shared_operations', 0)}")
@@ -1430,7 +1646,10 @@ def main():
         
         try:
             response = assistant.process_message(user_input, user_id)
-            print(f"\nAssistant: {response}\n")
+            if output_manager.silent_mode:
+                output_manager.print_conversation(response)
+            else:
+                output_manager.print_conversation(f"\nAssistant: {response}\n")
             
             debug_tracker.log_operation("main_interface", "user_message_complete", {
                 "user_id": user_id,

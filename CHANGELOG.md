@@ -5,6 +5,30 @@ All notable changes to Buddy will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2025-06-08
+
+### 🔇 Silent Mode - Perfect Automation Interface
+
+Complete silent mode implementation for automation with zero console noise while preserving full command functionality.
+
+### Added
+- **Silent Mode**: `--silent` flag and `/silent on/off` command for pure input/output automation
+- **Dynamic Logging**: Console logging suppressed in silent mode, file logging always preserved
+- **Command Consistency**: All commands now start with "/" for uniform interface
+- **Comprehensive Help**: `/help` command with detailed documentation (works in silent mode)
+
+### Enhanced
+- **Explicit Command Output**: Commands work in silent mode when explicitly requested
+- **Zero System Chatter**: Silent mode shows only conversation and explicit command results  
+- **Runtime Toggle**: Switch silent mode on/off during conversation
+- **Automation Ready**: Perfect for scripting with no output filtering needed
+
+### Technical
+- **OutputManager**: Centralized output control with `print_explicit_command_result()`
+- **Intelligent Suppression**: System messages hidden, explicit commands always shown
+- **File Logging**: All activity logged to `/var/log/buddy/buddy.log` for debugging
+- **Command Standardization**: `/memories`, `/relationships`, `/forget`, `/search` all use "/" prefix
+
 ## [1.5.3] - 2025-06-08
 
 ### 🏗️ Phase 3: Extension Architecture - Multi-Agent Foundation
